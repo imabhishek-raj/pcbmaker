@@ -1,0 +1,9 @@
+node_modules/
+.env
+.amplify/
+amplify_outputs.json
+node_modules
+
+# amplify
+amplify_outputs*
+amplifyconfiguration*
