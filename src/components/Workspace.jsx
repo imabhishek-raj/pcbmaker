@@ -119,7 +119,6 @@ export default function Workspace() {
 
   const [inputMsg, setInputMsg] = useState('');
 
-  // Handle responsive resize dynamically
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 768;
@@ -132,6 +131,7 @@ export default function Workspace() {
       }
     };
     window.addEventListener('resize', handleResize);
+    handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -297,6 +297,7 @@ export default function Workspace() {
     };
     setNodes((nds) => [...nds, newNode]);
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
+    setIsPaletteOpen(false); // Auto-close drawer after adding
   };
 
   const handleSendMessage = async () => {
@@ -498,10 +499,9 @@ export default function Workspace() {
     };
   });
 
-  // Commercial EDA Uniform Header Button Style
   const headerBtnStyle = {
     height: '32px',
-    padding: '0 12px',
+    padding: '0 10px',
     fontSize: '11px',
     fontWeight: '600',
     borderRadius: '6px',
@@ -517,13 +517,32 @@ export default function Workspace() {
     whiteSpace: 'nowrap'
   };
 
+  const partnerLogos = [
+    "⚡ KiCad EDA", "☁️ AWS Amplify", "🧠 DeepSeek R1", "🛡️ STMicroelectronics", "📶 Espressif ESP32", "🔌 Texas Instruments", "🔋 DW01A BMS"
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', backgroundColor: '#09090b', color: '#f4f4f5', overflow: 'hidden', fontFamily: 'sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100vw', backgroundColor: '#09090b', color: '#f4f4f5', overflow: 'hidden', fontFamily: 'sans-serif' }}>
       
+      {/* TOOLBOX FLOATING DRAWER (CONDITIONALLY RENDERED ONLY WHEN isPaletteOpen IS TRUE) */}
+      {isPaletteOpen && (
+        <div style={{
+          position: 'fixed', top: '60px', right: '80px', zIndex: 90,
+          backgroundColor: '#18181b', border: '1px solid #00E5FF', borderRadius: '8px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.8)', overflow: 'hidden'
+        }}>
+          <ComponentPalette 
+            isOpen={true} 
+            onToggle={() => setIsPaletteOpen(false)} 
+            onAddComponent={handleManualAddComponent} 
+          />
+        </div>
+      )}
+
       {/* UNIFORM RESPONSIVE HEADER */}
-      <header style={{ height: '52px', minHeight: '52px', borderBottom: '1px solid #27272a', backgroundColor: '#18181b', padding: '0 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 20, overflowX: 'auto' }}>
+      <header style={{ height: '52px', minHeight: '52px', borderBottom: '1px solid #27272a', backgroundColor: '#18181b', padding: '0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 50, overflowX: 'auto' }}>
         
-        {/* LOGO BRANDING WITH CUSTOM COLOR ACCENTS */}
+        {/* LOGO BRANDING */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content' }}>
           {isMobile && (
             <button 
@@ -540,18 +559,10 @@ export default function Workspace() {
             <span style={{ color: '#7171AA' }}>.</span>
             <span style={{ color: '#10B981' }}>in</span>
           </span>
-
-          <span style={{ fontSize: '9px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 7px', borderRadius: '12px', fontWeight: '600' }}>
-            🇮🇳 India
-          </span>
         </div>
 
         {/* UNIFORM BUTTON TOOLBAR */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content' }}>
-          
-          <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '9px', padding: '5px 8px', borderRadius: '6px', fontFamily: 'monospace' }}>
-            AWS: ACTIVE
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 'max-content' }}>
           
           <button 
             onClick={() => setIsRightDrawerOpen(!isRightDrawerOpen)}
@@ -575,6 +586,11 @@ export default function Workspace() {
           <button onClick={exportFlywheelDataset} style={{ ...headerBtnStyle, backgroundColor: '#0284c7', color: '#ffffff', border: 'none' }}>
             📥 Dataset
           </button>
+
+          {/* TOOLBOX BUTTON PLACED NEXT TO DATASET */}
+          <button onClick={() => setIsPaletteOpen(!isPaletteOpen)} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#00E5FF', borderColor: '#00E5FF' }}>
+            🧩 Toolbox
+          </button>
           
           <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
             KiCad (.kicad_sch)
@@ -587,13 +603,13 @@ export default function Workspace() {
       </header>
 
       {/* WORKSPACE AREA */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', height: 'calc(100dvh - 52px)' }}>
         
-        {/* LEFT COPILOT DRAWER (SLIDING ON MOBILE, FIXED ON DESKTOP) */}
+        {/* LEFT COPILOT DRAWER (CLEAN, CHAT-ONLY) */}
         <aside style={{ 
-          width: '320px', 
+          width: isMobile ? '100vw' : '320px', 
           minWidth: isMobile ? '100vw' : '300px', 
-          maxWidth: '340px', 
+          maxWidth: isMobile ? '100vw' : '340px', 
           borderRight: '1px solid #27272a', 
           backgroundColor: '#18181b', 
           display: 'flex', 
@@ -601,15 +617,10 @@ export default function Workspace() {
           zIndex: 40,
           position: isMobile ? 'absolute' : 'relative',
           top: 0, bottom: 0, left: 0,
+          height: '100%',
           transform: (isMobile && !isLeftCopilotOpen) ? 'translateX(-100%)' : 'translateX(0)',
           transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         }}>
-          
-          <ComponentPalette 
-            isOpen={isPaletteOpen} 
-            onToggle={() => setIsPaletteOpen(!isPaletteOpen)} 
-            onAddComponent={handleManualAddComponent} 
-          />
 
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #27272a', fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -650,7 +661,8 @@ export default function Workspace() {
             )}
           </div>
 
-          <div style={{ padding: '10px', borderTop: '1px solid #27272a', display: 'flex', gap: '6px' }}>
+          {/* CHAT INPUT AREA FIXED TO BOTTOM */}
+          <div style={{ padding: '10px', borderTop: '1px solid #27272a', display: 'flex', gap: '6px', backgroundColor: '#18181b', paddingBottom: isMobile ? '20px' : '10px' }}>
             <input 
               value={inputMsg}
               disabled={isLoading}
@@ -829,32 +841,112 @@ export default function Workspace() {
         </aside>
       </div>
 
-      {/* ABOUT US & SUPPORT MODAL */}
+      {/* ABOUT US, OUR MISSION & ANIMATED PARTNERS MODAL */}
       {isAboutModalOpen && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 100,
+          backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 100,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(4px)', padding: '16px'
+          backdropFilter: 'blur(6px)', padding: '16px'
         }}>
           <div style={{
-            backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px',
-            padding: '24px', width: '100%', maxWidth: '420px', fontFamily: 'monospace', color: '#f4f4f5'
+            backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px',
+            padding: '24px', width: '100%', maxWidth: '540px', maxHeight: '88vh',
+            display: 'flex', flexDirection: 'column', fontFamily: 'monospace', color: '#f4f4f5',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.8)'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '8px' }}>
-              <h3 style={{ margin: 0, color: '#00E5FF' }}>About pcbmaker.in</h3>
-              <button onClick={() => setIsAboutModalOpen(false)} style={{ background: 'none', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            {/* MODAL HEADER */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontWeight: '800', fontSize: '18px' }}>
+                  <span style={{ color: '#FF6B00' }}>pcb</span>
+                  <span style={{ color: '#FFFFFF' }}>maker</span>
+                  <span style={{ color: '#7171AA' }}>.</span>
+                  <span style={{ color: '#10B981' }}>in</span>
+                </span>
+              </div>
+              <button onClick={() => setIsAboutModalOpen(false)} style={{ background: 'none', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }}>✕</button>
             </div>
-            <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#a1a1aa', margin: '0 0 16px 0' }}>
-              <strong>pcbmaker.in</strong> is an AI-powered EDA Hardware Copilot engineered to accelerate schematic generation, netlist validation, and DRC verification on autopilot.
-            </p>
-            <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '6px', border: '1px solid #27272a' }}>
-              <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Direct Support & Contact</span>
-              <a href="mailto:support@pcbmaker.in" style={{ color: '#00E5FF', fontWeight: 'bold', textDecoration: 'none', fontSize: '13px' }}>
-                ✉️ support@pcbmaker.in
-              </a>
+
+            {/* SCROLLABLE BODY CONTENT */}
+            <div style={{ flex: 1, overflowY: 'auto', paddingRight: '6px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              
+              {/* MISSION STATEMENT */}
+              <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '8px', border: '1px solid #27272a' }}>
+                <span style={{ fontSize: '11px', color: '#FF6B00', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>
+                  🎯 Our Mission
+                </span>
+                <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#f4f4f5', margin: 0 }}>
+                  <strong>Democratizing Hardware Innovation:</strong> Building India's first fully autonomous, AI-driven EDA platform to bridge natural language prompts directly into production-grade electronic schematics with 0 DRC errors.
+                </p>
+              </div>
+
+              {/* SERVICES LIST SECTION */}
+              <div style={{ borderTop: '1px solid #27272a', paddingTop: '12px' }}>
+                <span style={{ fontSize: '11px', color: '#00E5FF', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '10px' }}>
+                  ⚡ Platform Capabilities & Services
+                </span>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
+                    <div style={{ color: '#38bdf8', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>🤖 AI Natural Language Copilot</div>
+                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Instant text-to-schematic synthesis for Microcontrollers, BMS protection circuits, IoT nodes, and custom hardware.</div>
+                  </div>
+
+                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
+                    <div style={{ color: '#10b981', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>🔍 Automated Design Rule Checking (DRC)</div>
+                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Real-time netlist validation checking power/GND loops, current-limiting resistors, and signal integrity.</div>
+                  </div>
+
+                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
+                    <div style={{ color: '#f59e0b', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>📂 KiCad EDA Native Export</div>
+                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Generates standard `.kicad_sch` schematics compatible with KiCad for immediate PCB routing & manufacturing.</div>
+                  </div>
+
+                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
+                    <div style={{ color: '#a855f7', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>🔄 Cloud Training Data Flywheel</div>
+                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Seamlessly streams verified 0-DRC circuit netlists directly to Amazon S3 for continuous AI model fine-tuning.</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ANIMATED ECOSYSTEM PARTNERS MARQUEE */}
+              <div style={{ borderTop: '1px solid #27272a', paddingTop: '12px', overflow: 'hidden' }}>
+                <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+                  🤝 Ecosystem Compatibility & Integrations
+                </span>
+
+                <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', backgroundColor: '#09090b', padding: '8px', borderRadius: '6px', border: '1px solid #27272a' }}>
+                  <div style={{
+                    display: 'inline-block',
+                    animation: 'marquee 18s linear infinite',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    color: '#00E5FF',
+                    letterSpacing: '1px'
+                  }}>
+                    {partnerLogos.join(" ──► ")} ──► {partnerLogos.join(" ──► ")}
+                  </div>
+                </div>
+              </div>
+
+              {/* DIRECT SUPPORT BOX */}
+              <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '6px', border: '1px solid #27272a', marginTop: '2px' }}>
+                <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Direct Inquiries & Technical Support</span>
+                <a href="mailto:support@pcbmaker.in" style={{ color: '#00E5FF', fontWeight: 'bold', textDecoration: 'none', fontSize: '13px' }}>
+                  ✉️ support@pcbmaker.in
+                </a>
+              </div>
+
             </div>
           </div>
+
+          <style>{`
+            @keyframes marquee {
+              0% { transform: translateX(0%); }
+              100% { transform: translateX(-50%); }
+            }
+          `}</style>
         </div>
       )}
 
