@@ -1,114 +1,45 @@
 // src/utils/drcEngine.js
 
-const arePinsCompatible = (p1 = '', p2 = '') => {
-  const a = String(p1).toUpperCase();
-  const b = String(p2).toUpperCase();
-
-  if (a === b) return true;
-  if ((a.includes('TX') && b.includes('RX')) || (a.includes('RX') && b.includes('TX'))) return true;
-  if ((a.includes('OUT') || a.includes('3V3') || a.includes('VCC') || a.includes('VDD') || a.includes('AVCC') || a.includes('IN') || a === '+') && 
-      (b.includes('OUT') || b.includes('3V3') || b.includes('VCC') || b.includes('VDD') || b.includes('AVCC') || b.includes('IN') || b === '+')) return true;
-  if ((a.includes('GND') || a.includes('VSS') || a === '-') && (b.includes('GND') || b.includes('VSS') || b === '-')) return true;
-  return false;
-};
-
 export function runDRCCheck(nodes, edges) {
   if (!nodes || nodes.length === 0) return [];
 
   const errors = [];
-  const connectedHandles = new Set();
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
 
-  // Track all connected pins across edges
-  edges.forEach((edge) => {
-    if (edge.source && edge.sourceHandle) {
-      const cleanSource = edge.sourceHandle.replace(/_(in|out)$/, '');
-      connectedHandles.add(`${edge.source}:${cleanSource}`);
-    }
-    if (edge.target && edge.targetHandle) {
-      const cleanTarget = edge.targetHandle.replace(/_(in|out)$/, '');
-      connectedHandles.add(`${edge.target}:${cleanTarget}`);
-    }
-  });
+  edges.forEach((edge, index) => {
+    const srcNode = nodeMap.get(edge.source);
+    const tgtNode = nodeMap.get(edge.target);
 
-  nodes.forEach((node) => {
-    const pins = node.data?.pins || [];
-    const nodeLabel = (node.data?.label || node.id).toUpperCase();
+    if (!srcNode || !tgtNode) return;
 
-    // Determine if component is passive or discrete switch (MOSFETs, Switches, Resistors, LEDs, Fuses)
-    const isPassiveOrDiscrete = 
-      nodeLabel.includes('RESISTOR') || /^R\d+/i.test(node.id) ||
-      nodeLabel.includes('CAPACITOR') || /^C\d+/i.test(node.id) ||
-      nodeLabel.includes('SWITCH') || /^SW\d+/i.test(node.id) ||
-      nodeLabel.includes('LED') || nodeLabel.includes('DIODE') || /^D\d+/i.test(node.id) ||
-      nodeLabel.includes('MOSFET') || /^MOS\d+/i.test(node.id) || /^Q\d+/i.test(node.id) ||
-      nodeLabel.includes('FUSE') || /^F\d+/i.test(node.id) ||
-      nodeLabel.includes('XTAL') || nodeLabel.includes('CRYSTAL') || /^X\d+/i.test(node.id);
+    // Get clean pin names
+    const srcPin = (edge.sourceHandle || '').replace(/_(in|out)$/, '').toUpperCase();
+    const tgtPin = (edge.targetHandle || '').replace(/_(in|out)$/, '').toUpperCase();
 
-    let connectedPinCount = 0;
-    let hasActivePower = false;
+    const srcLabel = (srcNode.data?.label || srcNode.id).toUpperCase();
+    const tgtLabel = (tgtNode.data?.label || tgtNode.id).toUpperCase();
 
-    pins.forEach((pin) => {
-      const pinId = String(typeof pin === 'string' ? pin : (pin.id || pin.label));
-      const handleKey = `${node.id}:${pinId}`;
+    // Helper classification
+    const isPower = (label, pin) => pin.includes('VCC') || pin.includes('VDD') || pin.includes('3V3') || pin.includes('5V') || pin.includes('VIN');
+    const isGround = (label, pin) => pin.includes('GND') || pin.includes('VSS');
+    const isDataOrTxRx = (label, pin) => pin.includes('TX') || pin.includes('RX') || pin.includes('SDA') || pin.includes('SCL') || pin.includes('D+') || pin.includes('D-');
 
-      let isConnected = connectedHandles.has(handleKey);
-
-      if (!isConnected) {
-        for (const connKey of connectedHandles) {
-          if (connKey.startsWith(`${node.id}:`)) {
-            const connPin = connKey.split(':')[1];
-            if (arePinsCompatible(connPin, pinId)) {
-              isConnected = true;
-              break;
-            }
-          }
-        }
-      }
-
-      if (isConnected) {
-        connectedPinCount++;
-      }
-
-      const upperPin = pinId.toUpperCase();
-      const isPowerOrGnd = upperPin.includes('VCC') || upperPin.includes('3V3') || upperPin.includes('VDD') || 
-                            upperPin.includes('AVCC') || upperPin.includes('GND') || upperPin.includes('VSS') || 
-                            upperPin.includes('IN') || upperPin.includes('OUT') || upperPin === '+' || upperPin === '-';
-
-      if (isConnected && isPowerOrGnd) {
-        hasActivePower = true;
-      }
-
-      // Optional / GPIO / Debug / Test Pin Exemption List
-      const isOptionalPin = upperPin.includes('TD') || upperPin.includes('NC') ||
-                            upperPin.includes('SDA') || upperPin.includes('SCL') || upperPin.includes('IO') || 
-                            upperPin.includes('TX') || upperPin.includes('RX') || upperPin.includes('EN') || 
-                            upperPin.includes('NRST') || upperPin.includes('RESET') || upperPin.includes('XTAL') || 
-                            upperPin.includes('D+') || upperPin.includes('D-') || upperPin.includes('INT') ||
-                            upperPin.includes('SWD') || upperPin.includes('SWC') || upperPin.includes('CLK') ||
-                            upperPin.includes('BUS');
-
-      if (!isConnected && !isOptionalPin && !isPassiveOrDiscrete) {
-        errors.push({
-          id: `floating_${node.id}_${pinId}`,
-          severity: 'warning',
-          message: `${node.id.toUpperCase()}: ${node.data?.label || ''} → Pin "${pinId}" is floating (unconnected).`
-        });
-      }
-    });
-
-    // PASSIVE RULE: Passives / MOSFETs are valid as long as at least 1 pin is wired into the net trace
-    if (isPassiveOrDiscrete) {
-      if (connectedPinCount > 0) {
-        hasActivePower = true;
-      }
-    }
-
-    // ACTIVE IC RULE: Active ICs must have power rail connections
-    if (!hasActivePower && pins.length > 0) {
+    // 🔴 RULE 1: Short circuit (Power to Ground)
+    if ((isPower(srcLabel, srcPin) && isGround(tgtLabel, tgtPin)) || (isGround(srcLabel, srcPin) && isPower(tgtLabel, tgtPin))) {
       errors.push({
-        id: `nopower_${node.id}`,
+        id: `drc_short_${edge.id || index}`,
         severity: 'error',
-        message: `${node.id.toUpperCase()}: ${node.data?.label || ''} has no active power connections!`
+        message: `🔴 DRC SHORT CIRCUIT: Power rail (${srcPin}) shorted to Ground (${tgtPin}) between ${srcNode.id.toUpperCase()} and ${tgtNode.id.toUpperCase()}!`
+      });
+    }
+
+    // 🔴 RULE 2: UART/I2C Data line crossed into a Capacitor or Power rail
+    const isCapacitor = label => label.includes('CAPACITOR') || label.includes('C1') || label.includes('C2');
+    if ((isDataOrTxRx(srcLabel, srcPin) && isCapacitor(tgtLabel)) || (isDataOrTxRx(tgtLabel, tgtPin) && isCapacitor(srcLabel))) {
+      errors.push({
+        id: `drc_data_cap_${edge.id || index}`,
+        severity: 'error',
+        message: `🔴 DRC TOPOLOGY ERROR: Communication/Data line (${srcPin}) cannot be wired directly into a Capacitor terminal on ${tgtNode.id.toUpperCase()}!`
       });
     }
   });

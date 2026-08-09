@@ -9,12 +9,14 @@ export const COMPONENT_LIBRARY = {
   'PAM8403': ['VDD', 'GND', 'L_IN', 'R_IN', 'OUT_L+', 'OUT_L-', 'OUT_R+', 'OUT_R-', 'MUTE', 'SW'],
   'LM386': ['GAIN1', 'GAIN8', 'IN-', 'IN+', 'GND', 'VCC', 'BYPASS', 'OUT'],
   'MAX98357A': ['VIN', 'GND', 'SD_MODE', 'GAIN', 'DIN', 'BCLK', 'LRCLK', 'OUT+', 'OUT-'],
+  'TDA2030A': ['IN+', 'IN-', 'VSS', 'OUTPUT', 'VDD'],
   'TDA2030': ['IN+', 'IN-', 'VSS', 'OUTPUT', 'VDD'],
 
   // -----------------------------------------------------------------
   // 2. MICROCONTROLLERS & SOC CORES
   // -----------------------------------------------------------------
   'ESP32-S3': ['3V3', 'GND', 'EN', 'TX', 'RX', 'IO0', 'IO1', 'SDA', 'SCL', 'D+', 'D-'],
+  'ESP32-WROOM': ['3V3', 'GND', 'EN', 'TX', 'RX', 'IO0', 'IO2', 'IO4', 'IO12', 'IO13', 'IO14', 'IO15', 'IO21', 'IO22', 'IO23'],
   'ESP32': ['3V3', 'GND', 'EN', 'TX', 'RX', 'SDA', 'SCL', 'IO4', 'IO2', 'VP', 'VN'],
   'ESP8266': ['3V3', 'GND', 'EN', 'TX', 'RX', 'RST', 'IO0', 'IO15', 'IO2'],
   'ATMEGA328P': ['VCC', 'GND', 'RESET', 'XTAL1', 'XTAL2', 'PD0_RX', 'PD1_TX', 'PB0', 'PB1', 'ADC0'],
@@ -73,6 +75,8 @@ export const COMPONENT_LIBRARY = {
   'CH340': ['VCC', 'GND', 'TXD', 'RXD', 'UD+', 'UD-'],
   'USB-C': ['VBUS', 'GND', 'CC1', 'CC2', 'D+', 'D-'],
   'USB': ['VBUS', 'GND', 'D+', 'D-'],
+  'DC JACK': ['1', '2'],
+  'SPEAKER': ['1', '2'],
 
   // -----------------------------------------------------------------
   // 7. OP-AMPS & COMPARATORS
@@ -111,6 +115,7 @@ export const COMPONENT_LIBRARY = {
   'CRYSTAL': ['1', '2'],
   'LED': ['ANODE', 'CATHODE'],
   'DIODE': ['ANODE', 'CATHODE'],
+  '1N4007': ['ANODE', 'CATHODE'],
   'SWITCH': ['1', '2'],
   'SW': ['1', '2'],
   'RESISTOR': ['1', '2'],
@@ -121,30 +126,47 @@ export const COMPONENT_LIBRARY = {
 export function getComponentPins(compName = '') {
   const name = compName.toUpperCase().trim();
 
-  // 1. Strict Passive Isolation (Prevents C1, R1, SW1, L1, XTAL1 from adopting IC pins)
-  if (/^C\d+:/i.test(name) || name.includes('CAPACITOR') || name.includes('CAP') || /^R\d+:/i.test(name) || name.includes('RESISTOR')) {
+  // 🛡️ ABSOLUTE PRIORITY: Passives MUST have strictly 2 pins (1 and 2)
+  if (/^R\d+/i.test(name) || name.includes('RESISTOR') || name.includes('RES')) {
     return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
   }
-  if (/^L\d+:/i.test(name) || name.includes('INDUCTOR')) {
+  if (/^C\d+/i.test(name) || name.includes('CAPACITOR') || name.includes('CAP')) {
     return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
   }
-  if (/^SW\d+:/i.test(name) || name.includes('SWITCH') || name.includes('TACTILE')) {
+  if (/^L\d+/i.test(name) || name.includes('INDUCTOR')) {
     return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
   }
-  if (/^XTAL\d+:/i.test(name) || name.includes('CRYSTAL') || name.includes('OSCILLATOR')) {
+
+  // Diodes
+  if (/^D\d+/i.test(name) || name.includes('DIODE') || name.includes('1N4007')) {
+    return [{ id: '1', label: 'ANODE' }, { id: '2', label: 'CATHODE' }];
+  }
+
+  // Switches & Crystals
+  if (/^SW\d+/i.test(name) || name.includes('SWITCH') || name.includes('TACTILE')) {
     return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
   }
-  if (/^LED\d+:/i.test(name) || name.includes('INDICATOR')) {
+  if (/^XTAL\d+/i.test(name) || name.includes('CRYSTAL') || name.includes('OSCILLATOR')) {
+    return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
+  }
+
+  // LEDs & Indicators
+  if (/^LED\d+/i.test(name) || name.includes('INDICATOR') || name.includes('LED')) {
     return [{ id: 'ANODE', label: 'ANODE' }, { id: 'CATHODE', label: 'CATHODE' }];
   }
 
-  // 2. Exact or Partial IC Key Match
+  // Connectors / Jacks / Terminals
+  if (/^J\d+/i.test(name) || /^PWR\d+/i.test(name) || name.includes('AUDIO') || name.includes('SPEAKER') || name.includes('JACK') || name.includes('CONNECTOR') || name.includes('TERMINAL')) {
+    return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
+  }
+
+  // IC Key Match Lookup from COMPONENT_LIBRARY
   for (const [key, pins] of Object.entries(COMPONENT_LIBRARY)) {
     if (name.includes(key)) {
       return pins.map((p) => ({ id: p, label: p }));
     }
   }
 
-  // 3. Fallback for unknown ICs
+  // Fallback for unidentified active ICs only
   return [{ id: 'VCC', label: 'VCC' }, { id: 'GND', label: 'GND' }, { id: '1', label: '1' }, { id: '2', label: '2' }];
 }

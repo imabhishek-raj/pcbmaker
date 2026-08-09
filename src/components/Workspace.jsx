@@ -92,6 +92,35 @@ const arePinsCompatible = (p1 = '', p2 = '') => {
   return false;
 };
 
+// 🛡️ FIREWALL PIN SANITIZER: Forces passives to strictly have pins 1 and 2, NO VCC/GND
+const cleanNodePins = (compName, rawPins) => {
+  const name = String(compName || '').toUpperCase();
+  
+  if (
+    name.includes('RESISTOR') || /^R\d+/i.test(name) ||
+    name.includes('CAPACITOR') || /^C\d+/i.test(name) ||
+    name.includes('INDUCTOR') || /^L\d+/i.test(name)
+  ) {
+    return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
+  }
+  if (name.includes('SWITCH') || /^SW\d+/i.test(name)) {
+    return [{ id: '1', label: '1' }, { id: '2', label: '2' }];
+  }
+  if (name.includes('LED') || /^LED\d+/i.test(name)) {
+    return [{ id: 'ANODE', label: 'ANODE' }, { id: 'CATHODE', label: 'CATHODE' }];
+  }
+
+  if (Array.isArray(rawPins) && rawPins.length > 0) {
+    return rawPins.map(p => {
+      const pId = typeof p === 'string' ? p : (p.id || p.label);
+      return { id: pId, label: pId };
+    });
+  }
+
+  const libPins = getComponentPins(name);
+  return libPins.map(p => ({ id: p.id || p, label: p.label || p }));
+};
+
 const optimizePromptSpec = (rawQuery, previousHistory = []) => {
   const baseQuery = rawQuery.split('— Specs:')[0].trim();
   const q = baseQuery.toLowerCase();
@@ -138,7 +167,22 @@ const extractJsonFromOutput = (rawResult) => {
   try { return JSON.parse(text); } catch (e) { return {}; }
 };
 
-// DETERMINISTIC DRC PIN AUTO-PATCHER
+// UNIVERSAL PIN ROLE DETECTOR
+const getPinRole = (pinName, compLabel) => {
+  const p = String(pinName || '').toUpperCase();
+  const c = String(compLabel || '').toUpperCase();
+
+  if (['VCC', 'VDD', '3V3', '5V', '12V', 'VIN', 'VBUS', 'VBAT', 'VDDA', 'VCC1', 'VCC2'].some(k => p.includes(k))) return 'power_pos';
+  if (['GND', 'VSS', 'AGND', 'DGND', 'PGND', 'EP', 'PAD', '-'].some(k => p.includes(k))) return 'power_neg';
+  if (['FAULT', 'MUTE', 'SD', 'SHDN', 'EN', 'RESET', 'NRST', 'AM0', 'AM1', 'GAIN', 'MODE', 'CE'].some(k => p.includes(k))) return 'logic_high';
+  if (['NC', 'RSVD', 'RESERVED'].some(k => p.includes(k))) return 'no_connect';
+  if (c.includes('JACK') || c.includes('CONNECTOR') || c.includes('TERMINAL') || c.includes('HEADER')) {
+    return p === '1' ? 'power_pos' : 'power_neg';
+  }
+  return 'signal';
+};
+
+// UNIVERSAL DRC PIN AUTO-PATCHER
 const autoPatchFloatingPins = (currentNodes, currentEdges) => {
   const patchedEdges = [...currentEdges];
   const connectedPinKeys = new Set();
@@ -150,44 +194,46 @@ const autoPatchFloatingPins = (currentNodes, currentEdges) => {
 
   const powerNode = currentNodes.find(n => {
     const label = (n.data?.label || '').toUpperCase();
-    return label.includes('BAT') || label.includes('USB') || label.includes('AMS1117') || label.includes('AP2112') || label.includes('PWR');
+    return label.includes('BAT') || label.includes('USB') || label.includes('AMS1117') || label.includes('AP2112') || label.includes('DC') || label.includes('PWR') || label.includes('JACK');
   });
 
   if (!powerNode) return patchedEdges;
 
   currentNodes.forEach((node) => {
     const pins = node.data?.pins || [];
+    const compLabel = node.data?.label || '';
+
     pins.forEach((pin) => {
-      const pinId = String(pin.id || pin).toUpperCase();
-      const pinKey = `${node.id}:${pin.id || pin}`;
+      const pinId = String(pin.id || pin);
+      const pinKey = `${node.id}:${pinId}`;
 
       if (!connectedPinKeys.has(pinKey) && node.id !== powerNode.id) {
-        if (['VCC', 'VDD', '3V3', 'VIN', 'INPL', 'INPR'].includes(pinId)) {
+        const role = getPinRole(pinId, compLabel);
+
+        if (role === 'power_pos') {
           patchedEdges.push({
             id: `auto_pwr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
             source: powerNode.id,
             sourceHandle: 'VCC_out',
             target: node.id,
-            targetHandle: `${pin.id || pin}_in`,
+            targetHandle: `${pinId}_in`,
             type: 'step',
             animated: true,
             style: { stroke: '#EF4444', strokeWidth: 3 },
             label: 'VCC AUTO-RAIL'
           });
           connectedPinKeys.add(pinKey);
-        }
-
-        if (['GND', 'VSS', '-'].includes(pinId)) {
+        } else if (role === 'power_neg' || role === 'logic_high') {
           patchedEdges.push({
             id: `auto_gnd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
             source: node.id,
-            sourceHandle: `${pin.id || pin}_out`,
+            sourceHandle: `${pinId}_out`,
             target: powerNode.id,
             targetHandle: 'GND_in',
             type: 'step',
             animated: true,
             style: { stroke: '#10B981', strokeWidth: 2.5, strokeDasharray: '4' },
-            label: 'GND AUTO-RETURN'
+            label: role === 'logic_high' ? 'PULL-CONFIG' : 'GND RETURN'
           });
           connectedPinKeys.add(pinKey);
         }
@@ -300,13 +346,19 @@ export default function Workspace() {
         labelBgStyle: { fill: '#18181b', rx: 4, ry: 4 }
       };
 
-      setEdges((eds) => addEdge(newEdge, eds));
+      const updatedEdges = addEdge(newEdge, edges);
+      setEdges(updatedEdges);
+      
+      // Enforce immediate DRC validation on manual wiring
+      const validationErrors = runDRCCheck(nodes, updatedEdges);
+      setDrcErrors(validationErrors);
+
       addChatMessage({ 
         sender: 'AI Copilot', 
         text: `Manual trace connected: ${params.source} (${srcLabel}) ➔ ${params.target} (${tgtLabel})` 
       });
     },
-    [addChatMessage]
+    [nodes, edges, setDrcErrors, addChatMessage]
   );
 
   const handleEdgeClick = useCallback((_, edge) => {
@@ -374,6 +426,7 @@ export default function Workspace() {
 
       const item = JSON.parse(rawData);
       const newId = `${item.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now().toString().slice(-4)}`;
+      const formattedPins = cleanNodePins(item.name, item.pins);
 
       const newNode = {
         id: newId,
@@ -381,7 +434,7 @@ export default function Workspace() {
         position: { x: event.clientX - 200, y: event.clientY - 100 },
         data: {
           label: `${newId}: ${item.name}`,
-          pins: item.pins.map((p) => ({ id: p, label: p }))
+          pins: formattedPins
         }
       };
 
@@ -393,13 +446,14 @@ export default function Workspace() {
 
   const handleManualAddComponent = (item) => {
     const newId = `${item.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now().toString().slice(-4)}`;
+    const formattedPins = cleanNodePins(item.name, item.pins);
     const newNode = {
       id: newId,
       type: 'icNode',
       position: { x: 120 + (nodes.length % 3) * 320, y: 120 + Math.floor(nodes.length / 3) * 200 },
       data: {
         label: `${newId}: ${item.name}`,
-        pins: item.pins.map((p) => ({ id: p, label: p }))
+        pins: formattedPins
       }
     };
     setNodes((nds) => [...nds, newNode]);
@@ -460,7 +514,7 @@ export default function Workspace() {
           const nodeId = c.id || `node_${index}`;
           const compName = c.name || c.label || c.type || '';
           
-          const formattedPins = getComponentPins(compName);
+          const formattedPins = cleanNodePins(compName, c.pins);
           nodePinMap[nodeId] = formattedPins.map(p => p.id);
 
           const upper = compName.toUpperCase();
@@ -968,7 +1022,7 @@ export default function Workspace() {
                   letterSpacing: '-0.5px',
                   lineHeight: '1.2'
                 }}>
-                  Design Hardware Circuits at the Speed of Thought
+                  Dream It. Design It. Deploy It.
                 </h1>
 
                 {/* ANIMATED TYPEWRITER SLOGAN */}
