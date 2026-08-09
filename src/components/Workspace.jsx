@@ -50,32 +50,39 @@ const arePinsCompatible = (p1 = '', p2 = '') => {
   return false;
 };
 
-const optimizePromptSpec = (rawQuery) => {
+const optimizePromptSpec = (rawQuery, previousHistory = []) => {
   const baseQuery = rawQuery.split('— Specs:')[0].trim();
   const q = baseQuery.toLowerCase();
 
+  // Multi-turn context thread construction
+  let contextContextStr = '';
+  if (previousHistory.length > 0) {
+    const lastSummary = previousHistory.slice(-4).map(m => `${m.sender}: ${m.text}`).join(' | ');
+    contextContextStr = ` [Active Session Context: ${lastSummary}]`;
+  }
+
   // 1. 4-bit / 8-bit CPUs & MCUs
   if (q.includes('4 bit') || q.includes('4-bit') || q.includes('8 bit') || q.includes('8-bit') || q.includes('atmega') || q.includes('avr') || q.includes('cpu')) {
-    return `${baseQuery} — Specs: Include ATmega328P MCU (MCU1), AMS1117-3.3V Regulator (U1), 16MHz Crystal Oscillator (XTAL1), 10k Reset Resistor (R1), Reset Tactile Switch (SW1), and 100nF Cap (C1). Connect VCC, GND, RESET, XTAL1, and XTAL2.`;
+    return `${baseQuery}${contextContextStr} — Specs: Include ATmega328P MCU (MCU1), AMS1117-3.3V Regulator (U1), 16MHz Crystal Oscillator (XTAL1), 10k Reset Resistor (R1), Reset Tactile Switch (SW1), and 100nF Cap (C1). Connect VCC, GND, RESET, XTAL1, and XTAL2.`;
   }
 
   // 2. 32-Bit Microcontrollers
   if (q.includes('32 bit') || q.includes('32-bit') || q.includes('stm32') || q.includes('arm')) {
-    return `${baseQuery} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
+    return `${baseQuery}${contextContextStr} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
   }
 
   // 3. Flight Controller / ESP32
   if (q.includes('flight controller') || q.includes('esp 32 mini') || q.includes('itself') || q.includes('bare') || (q.includes('esp') && !q.includes('bms') && !q.includes('led'))) {
-    return `${baseQuery} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
+    return `${baseQuery}${contextContextStr} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
   }
 
   // 4. BMS / Protection
   if (q.includes('bms') || q.includes('battery protection') || q.includes('protection circuit')) {
-    return `${baseQuery} — Specs: Include 3.7V Cell (BAT1), DW01A Protection IC (IC1), AO8810 Dual N-Channel MOSFET (MOS1), 100nF decoupling capacitor (C1), and 1kΩ CS current resistor (R1). Connect VCC, GND, OD, and OC control nets.`;
+    return `${baseQuery}${contextContextStr} — Specs: Include 3.7V Cell (BAT1), DW01A Protection IC (IC1), AO8810 Dual N-Channel MOSFET (MOS1), 100nF decoupling capacitor (C1), and 1kΩ CS current resistor (R1). Connect VCC, GND, OD, and OC control nets.`;
   }
 
-  // 5. Default Fallback
-  return `${baseQuery} — Specs: Standard EDA netlist layout with decoupling, verified pin routing, and continuous power/GND return loop.`;
+  // 5. Default Fallback with Context
+  return `${baseQuery}${contextContextStr} — Specs: Standard EDA netlist layout with decoupling, verified pin routing, and continuous power/GND return loop.`;
 };
 
 const extractJsonFromOutput = (rawResult) => {
@@ -97,6 +104,7 @@ export default function Workspace() {
   const [edges, setEdges] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(true);
   const [selectedEdge, setSelectedEdge] = useState(null);
 
   const { 
@@ -110,6 +118,15 @@ export default function Workspace() {
   } = useBoardStore();
 
   const [inputMsg, setInputMsg] = useState('');
+
+  // Complete Reset Handler
+  const handleFullReset = () => {
+    setNodes([]);
+    setEdges([]);
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    clearChatHistory();
+  };
 
   // Live DRC Check Engine
   useEffect(() => {
@@ -130,10 +147,9 @@ export default function Workspace() {
         const cardHeight = Math.max(140, 60 + pinCount * 26);
 
         let col = 1;
-
-        if (name.includes('USB') || name.includes('BAT') || name.includes('3.7V')) { col = 0; }
-        else if (name.includes('AMS1117') || name.includes('AP2112') || name.includes('REG') || name.includes('CP2102') || name.includes('U1') || name.includes('U2')) { col = 1; }
-        else if (name.includes('ESP') || name.includes('MCU') || name.includes('STM32') || name.includes('ATMEGA') || name.includes('CPU')) { col = 2; }
+        if (name.includes('USB') || name.includes('BAT') || name.includes('CELL') || name.includes('3.7V') || name.includes('PWR')) { col = 0; }
+        else if (name.includes('AMS1117') || name.includes('AP2112') || name.includes('REG') || name.includes('CP2102') || name.includes('RESISTOR') || name.includes('R1') || name.includes('R2')) { col = 1; }
+        else if (name.includes('ESP') || name.includes('MCU') || name.includes('STM32') || name.includes('ATMEGA') || name.includes('CPU') || name.includes('LED')) { col = 2; }
         else { col = 3; }
 
         const currentY = columnYOffsets[col];
@@ -177,11 +193,13 @@ export default function Workspace() {
   const handleEdgeClick = useCallback((_, edge) => {
     setSelectedNode(null);
     setSelectedEdge(edge);
+    setIsRightDrawerOpen(true);
   }, [setSelectedNode]);
 
   const handleNodeClick = useCallback((_, node) => {
     setSelectedEdge(null);
     setSelectedNode(node);
+    setIsRightDrawerOpen(true);
   }, [setSelectedNode]);
 
   const handleExportKiCad = () => {
@@ -240,7 +258,7 @@ export default function Workspace() {
       const newNode = {
         id: newId,
         type: 'icNode',
-        position: { x: event.clientX - 400, y: event.clientY - 100 },
+        position: { x: event.clientX - 200, y: event.clientY - 100 },
         data: {
           label: `${newId}: ${item.name}`,
           pins: item.pins.map((p) => ({ id: p, label: p }))
@@ -268,7 +286,7 @@ export default function Workspace() {
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
   };
 
-  // MAIN GENERATION PIPELINE WITH RAG, FEW-SHOT, AND DATA FLYWHEEL LOGGING
+  // MULTI-TURN PERSISTENT GENERATION PIPELINE
   const handleSendMessage = async () => {
     if (!inputMsg.trim() || isLoading) return;
 
@@ -279,10 +297,8 @@ export default function Workspace() {
     setIsLoading(true);
 
     try {
-      // 1. Optimize Prompt Specs
-      const specRefinedPrompt = optimizePromptSpec(rawUserQuery);
-      
-      // 2. Inject RAG Datasheet Pinouts & Few-Shot Engineering Rules
+      // Pass chat history so the AI remembers previous prompts & components!
+      const specRefinedPrompt = optimizePromptSpec(rawUserQuery, chatMessages);
       const ragEnhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
       
       addChatMessage({ 
@@ -290,20 +306,29 @@ export default function Workspace() {
         text: `✨ Refined Specs: "${specRefinedPrompt}"` 
       });
 
-      // 3. Call Backend LLM
       const response = await generatePcbFromAmplify(ragEnhancedPrompt);
       const result = extractJsonFromOutput(response);
 
       addChatMessage({ 
         sender: 'AI Copilot', 
-        text: result?.explanation || "Circuit netlist generated on canvas." 
+        text: result?.explanation || "Circuit netlist updated on canvas." 
       });
 
       const rawComponents = result?.components || result?.nodes || [];
       let rawConnections = result?.connections || result?.edges || [];
 
-      const formattedNodes = [];
+      // Preserve existing nodes if this is a follow-up refinement
+      const existingNodeMap = {};
+      nodes.forEach(n => { existingNodeMap[n.id] = n; });
+
+      const formattedNodes = [...nodes];
       const nodePinMap = {};
+
+      // Seed pin map from existing canvas
+      nodes.forEach(n => {
+        nodePinMap[n.id] = (n.data?.pins || []).map(p => p.id || p);
+      });
+
       let primaryPowerNode = null;
       let primaryMcuNode = null;
       let usbNode = null;
@@ -330,24 +355,27 @@ export default function Workspace() {
           }
 
           let col = 1;
-          if (upper.includes('BAT') || upper.includes('CELL') || upper.includes('USB')) { col = 0; }
-          else if (upper.includes('AMS1117') || upper.includes('AP2112') || upper.includes('REG') || upper.includes('CP2102') || upper.includes('U1') || upper.includes('U2')) { col = 1; }
-          else if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32') || upper.includes('ATMEGA') || upper.includes('CPU')) { col = 2; }
+          if (upper.includes('BAT') || upper.includes('CELL') || upper.includes('USB') || upper.includes('PWR')) { col = 0; }
+          else if (upper.includes('AMS1117') || upper.includes('AP2112') || upper.includes('REG') || upper.includes('CP2102') || upper.includes('R1') || upper.includes('R2') || upper.includes('RESISTOR')) { col = 1; }
+          else if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32') || upper.includes('ATMEGA') || upper.includes('CPU') || upper.includes('LED')) { col = 2; }
           else { col = 3; }
 
           const cardHeight = Math.max(140, 60 + formattedPins.length * 26);
           const currentY = columnYOffsets[col];
           columnYOffsets[col] += cardHeight + 40;
 
-          formattedNodes.push({
-            id: nodeId,
-            type: 'icNode',
-            position: c.position || { x: 80 + col * 380, y: currentY },
-            data: {
-              label: `${nodeId}: ${compName}`,
-              pins: formattedPins
-            }
-          });
+          // Only add if not already present
+          if (!existingNodeMap[nodeId]) {
+            formattedNodes.push({
+              id: nodeId,
+              type: 'icNode',
+              position: c.position || { x: 80 + col * 380, y: currentY },
+              data: {
+                label: `${nodeId}: ${compName}`,
+                pins: formattedPins
+              }
+            });
+          }
         });
       }
 
@@ -355,8 +383,9 @@ export default function Workspace() {
         primaryPowerNode = formattedNodes[0].id;
       }
 
-      const formattedEdges = [];
+      const formattedEdges = [...edges];
       const addedKeys = new Set();
+      edges.forEach(e => addedKeys.add(`${e.source}:${e.sourceHandle}->${e.target}:${e.targetHandle}`));
 
       const pushEdge = (src, sPin, tgt, tPin) => {
         if (!src || !tgt || src === tgt) return;
@@ -386,45 +415,19 @@ export default function Workspace() {
         });
       };
 
-      // 1. Process Connections Provided by LLM
+      // 1. LLM Connections
       if (Array.isArray(rawConnections) && rawConnections.length > 0) {
         rawConnections.forEach((conn) => {
           pushEdge(conn.source, conn.sourcePin, conn.target, conn.targetPin);
         });
       }
 
-      // 2. Connect Regulator IN Pin to USB VBUS
+      // 2. Regulator IN Pin to USB VBUS
       if (primaryPowerNode && usbNode && primaryPowerNode !== usbNode) {
         pushEdge(usbNode, 'VBUS', primaryPowerNode, 'IN');
       }
 
-      // 3. Connect Reset / Boot Switches to MCU
-      if (primaryMcuNode) {
-        formattedNodes.forEach((node) => {
-          const lbl = (node.data?.label || node.id).toUpperCase();
-          if (lbl.includes('SW1') || lbl.includes('RESET')) {
-            const mcuPins = nodePinMap[primaryMcuNode] || [];
-            const rstPin = mcuPins.find(p => p.includes('EN') || p.includes('RESET') || p.includes('NRST')) || 'RESET';
-            pushEdge(primaryMcuNode, rstPin, node.id, '1');
-          }
-        });
-      }
-
-      // 4. Connect Crystal Oscillators to MCU
-      if (primaryMcuNode) {
-        formattedNodes.forEach((node) => {
-          const lbl = (node.data?.label || node.id).toUpperCase();
-          if (lbl.includes('XTAL') || lbl.includes('CRYSTAL') || lbl.includes('X1')) {
-            const mcuPins = nodePinMap[primaryMcuNode] || [];
-            const x1Pin = mcuPins.find(p => p.includes('XTAL1') || p.includes('X1')) || 'XTAL1';
-            const x2Pin = mcuPins.find(p => p.includes('XTAL2') || p.includes('X2')) || 'XTAL2';
-            pushEdge(primaryMcuNode, x1Pin, node.id, '1');
-            pushEdge(primaryMcuNode, x2Pin, node.id, '2');
-          }
-        });
-      }
-
-      // 5. Universal Alias Net Resolver
+      // 3. Universal Alias Net Resolver
       formattedNodes.forEach((node) => {
         const pins = nodePinMap[node.id] || [];
         pins.forEach((pId) => {
@@ -433,7 +436,6 @@ export default function Workspace() {
           );
 
           if (!isConnected) {
-            // Power / Ground Rails
             if (primaryPowerNode) {
               const powerPins = nodePinMap[primaryPowerNode] || ['1', '2'];
               const posPin = powerPins.find(p => p === '+' || p.includes('OUT') || p.includes('3V3') || p.includes('VCC') || p.includes('VDD') || p === '1') || powerPins[0];
@@ -446,7 +448,6 @@ export default function Workspace() {
               }
             }
 
-            // MCU Signal Aliases
             if (primaryMcuNode && node.id !== primaryMcuNode) {
               const mcuPins = nodePinMap[primaryMcuNode] || [];
               const matchPin = mcuPins.find(mPin => arePinsCompatible(mPin, pId));
@@ -458,11 +459,10 @@ export default function Workspace() {
         });
       });
 
-      // Update state AFTER all edge creation calls complete
       setNodes(formattedNodes);
       setEdges(formattedEdges);
 
-      // 🔄 DATA FLYWHEEL LOGGING: Save 0-DRC schematics for future fine-tuning
+      // Data Flywheel logging
       const currentErrors = runDRCCheck(formattedNodes, formattedEdges);
       if (currentErrors.length === 0 && typeof logTrainingPair === 'function') {
         logTrainingPair(rawUserQuery, result, currentErrors.length);
@@ -493,50 +493,70 @@ export default function Workspace() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', backgroundColor: '#09090b', color: '#f4f4f5', overflow: 'hidden', fontFamily: 'sans-serif' }}>
       
       {/* HEADER */}
-      <header style={{ height: '48px', borderBottom: '1px solid #27272a', backgroundColor: '#18181b', padding: '0 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontWeight: 'bold', color: '#22d3ee', fontSize: '18px' }}>pcbmaker.org</span>
-          <span style={{ fontSize: '11px', backgroundColor: '#2563eb', color: '#ffffff', padding: '2px 10px', borderRadius: '12px', fontWeight: '500' }}>
-            🌐 Made for the world, by India 🇮🇳
+      <header style={{ height: '48px', minHeight: '48px', borderBottom: '1px solid #27272a', backgroundColor: '#18181b', padding: '0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 20, flexWrap: 'nowrap', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content' }}>
+          <span style={{ fontWeight: 'bold', color: '#22d3ee', fontSize: '16px' }}>pcbmaker.org</span>
+          <span style={{ fontSize: '10px', backgroundColor: '#2563eb', color: '#ffffff', padding: '2px 8px', borderRadius: '12px', fontWeight: '500', display: 'inline-block' }}>
+            🇮🇳 India
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '10px', padding: '2px 8px', borderRadius: '12px', fontFamily: 'monospace' }}>
-            AWS BACKEND: ACTIVE
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content' }}>
+          <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '9px', padding: '2px 6px', borderRadius: '12px', fontFamily: 'monospace' }}>
+            AWS: ACTIVE
           </span>
+          
+          <button 
+            onClick={() => setIsRightDrawerOpen(!isRightDrawerOpen)}
+            style={{ 
+              backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.15)' : '#1e293b', 
+              color: drcErrors.length > 0 ? '#ef4444' : '#38bdf8', 
+              fontSize: '11px', 
+              padding: '5px 10px', 
+              borderRadius: '4px', 
+              border: `1px solid ${drcErrors.length > 0 ? '#ef4444' : '#0284c7'}`, 
+              cursor: 'pointer', 
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>{isRightDrawerOpen ? '➡️ Hide DRC' : '🔍 DRC Inspector'}</span>
+            <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '8px', backgroundColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', color: '#ffffff' }}>
+              {drcErrors.length}
+            </span>
+          </button>
+
           <button 
             onClick={handleAutoLayout}
-            style={{ backgroundColor: '#1e293b', color: '#38bdf8', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', border: '1px solid #0284c7', cursor: 'pointer', fontWeight: 'bold' }}
+            style={{ backgroundColor: '#1e293b', color: '#38bdf8', fontSize: '11px', padding: '5px 8px', borderRadius: '4px', border: '1px solid #0284c7', cursor: 'pointer', fontWeight: 'bold' }}
           >
-            ✨ Auto Layout
+            ✨ Layout
           </button>
-          <button 
-            onClick={clearChatHistory}
-            style={{ backgroundColor: '#27272a', color: '#a1a1aa', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', border: '1px solid #3f3f46', cursor: 'pointer' }}
-          >
-            Clear Chat
-          </button>
+          
           <button 
             onClick={exportFlywheelDataset}
-            style={{ backgroundColor: '#0284c7', color: '#ffffff', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
+            style={{ backgroundColor: '#0284c7', color: '#ffffff', fontSize: '11px', padding: '5px 8px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
             title="Export captured 0-DRC user prompts for LLM fine-tuning"
           >
-            📥 Export Dataset
+            📥 Dataset
           </button>
+          
           <button 
             onClick={handleExportKiCad}
-            style={{ backgroundColor: '#0891b2', color: '#ffffff', fontSize: '12px', padding: '6px 12px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: '500' }}
+            style={{ backgroundColor: '#0891b2', color: '#ffffff', fontSize: '11px', padding: '5px 10px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: '500' }}
           >
-            Export KiCad (.kicad_sch)
+            KiCad (.kicad_sch)
           </button>
         </div>
       </header>
 
-      {/* MAIN TRI-PANE LAYOUT */}
+      {/* MAIN RESPONSIVE WORKSPACE CONTAINER */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         
-        {/* LEFT PANEL */}
-        <aside style={{ width: '340px', minWidth: '340px', borderRight: '1px solid #27272a', backgroundColor: '#18181b', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
+        {/* LEFT COPILOT PANEL */}
+        <aside style={{ width: '320px', minWidth: '280px', maxWidth: '340px', borderRight: '1px solid #27272a', backgroundColor: '#18181b', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
           
           <ComponentPalette 
             isOpen={isPaletteOpen} 
@@ -544,45 +564,56 @@ export default function Workspace() {
             onAddComponent={handleManualAddComponent} 
           />
 
-          <div style={{ padding: '10px 12px', borderBottom: '1px solid #27272a', fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>AI Hardware Copilot</span>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: isLoading ? '#f59e0b' : '#10b981' }}></span>
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid #27272a', fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              AI Hardware Copilot
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isLoading ? '#f59e0b' : '#10b981' }}></span>
+            </span>
+            
+            {/* RESTORED CLEAR CHAT & RESET BUTTON */}
+            <button 
+              onClick={handleFullReset}
+              style={{ backgroundColor: '#27272a', color: '#f43f5e', border: '1px solid #3f3f46', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              title="Clear chat and reset canvas"
+            >
+              🗑️ Clear
+            </button>
           </div>
 
-          <div style={{ flex: 1, padding: '12px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', fontFamily: 'monospace', fontSize: '12px' }}>
+          <div style={{ flex: 1, padding: '10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'monospace', fontSize: '11px' }}>
             {chatMessages.map((m, i) => (
-              <div key={i} style={{ padding: '10px', borderRadius: '8px', border: '1px solid #27272a', backgroundColor: m.sender.includes('AI') ? '#27272a' : '#083344', color: m.sender.includes('AI') ? '#67e8f9' : '#f4f4f5', marginLeft: m.sender.includes('AI') ? '0' : '16px' }}>
-                <div style={{ fontSize: '9px', color: '#71717a', marginBottom: '4px', fontWeight: 'bold', textTransform: 'uppercase' }}>{m.sender}</div>
+              <div key={i} style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #27272a', backgroundColor: m.sender.includes('AI') ? '#27272a' : '#083344', color: m.sender.includes('AI') ? '#67e8f9' : '#f4f4f5', marginLeft: m.sender.includes('AI') ? '0' : '12px' }}>
+                <div style={{ fontSize: '9px', color: '#71717a', marginBottom: '3px', fontWeight: 'bold', textTransform: 'uppercase' }}>{m.sender}</div>
                 {m.text}
               </div>
             ))}
             {isLoading && (
-              <div style={{ color: '#f59e0b', fontSize: '12px', fontStyle: 'italic' }}>
-                Refining specs & rendering netlist wires...
+              <div style={{ color: '#f59e0b', fontSize: '11px', fontStyle: 'italic' }}>
+                Refining specs & updating netlist wires...
               </div>
             )}
           </div>
 
-          <div style={{ padding: '12px', borderTop: '1px solid #27272a', display: 'flex', gap: '8px' }}>
+          <div style={{ padding: '10px', borderTop: '1px solid #27272a', display: 'flex', gap: '6px' }}>
             <input 
               value={inputMsg}
               disabled={isLoading}
               onChange={(e) => setInputMsg(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="e.g., flight controller using esp 32..."
-              style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '12px', padding: '8px 12px', borderRadius: '4px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none' }}
+              placeholder="e.g., now add a switch or status LED..."
+              style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '11px', padding: '8px', borderRadius: '4px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', width: '100%' }}
             />
             <button 
               onClick={handleSendMessage}
               disabled={isLoading}
-              style={{ backgroundColor: '#0891b2', fontSize: '12px', padding: '0 12px', borderRadius: '4px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '500' }}
+              style={{ backgroundColor: '#0891b2', fontSize: '11px', padding: '0 10px', borderRadius: '4px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '500' }}
             >
               Send
             </button>
           </div>
         </aside>
 
-        {/* CENTER WORKSPACE */}
+        {/* CENTER REACTFLOW CANVAS */}
         <main 
           onDragOver={onDragOver}
           onDrop={onDrop}
@@ -609,13 +640,40 @@ export default function Workspace() {
           </ReactFlow>
         </main>
 
-        {/* RIGHT PANEL */}
-        <aside style={{ width: '320px', minWidth: '320px', borderLeft: '1px solid #27272a', backgroundColor: '#18181b', padding: '16px', fontFamily: 'monospace', fontSize: '12px', zIndex: 10, overflowY: 'auto' }}>
-          
+        {/* RIGHT SLIDING DRAWER PANEL */}
+        <aside 
+          style={{ 
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: '320px', 
+            backgroundColor: '#18181b', 
+            borderLeft: '1px solid #27272a',
+            padding: '16px', 
+            fontFamily: 'monospace', 
+            fontSize: '11px', 
+            zIndex: 30, 
+            overflowY: 'auto',
+            transform: isRightDrawerOpen ? 'translateX(0)' : 'translateX(100%)',
+            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            boxShadow: isRightDrawerOpen ? '-4px 0 20px rgba(0,0,0,0.5)' : 'none'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '8px' }}>
+            <span style={{ fontWeight: 'bold', color: '#a1a1aa', textTransform: 'uppercase' }}>DRC & Inspector</span>
+            <button 
+              onClick={() => setIsRightDrawerOpen(false)}
+              style={{ backgroundColor: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}
+            >
+              ✕
+            </button>
+          </div>
+
           <div style={{ marginBottom: '20px' }}>
-            <div style={{ fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontWeight: 'bold', fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>DRC Validation Check</span>
-              <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '10px', backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)', color: drcErrors.length > 0 ? '#ef4444' : '#10b981' }}>
+              <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '10px', backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)', color: drcErrors.length > 0 ? '#ef4444' : '#10b981' }}>
                 {drcErrors.length} Issue{drcErrors.length !== 1 ? 's' : ''}
               </span>
             </div>
@@ -637,26 +695,26 @@ export default function Workspace() {
           </div>
 
           <div style={{ borderTop: '1px solid #27272a', paddingTop: '16px' }}>
-            <div style={{ fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '12px' }}>
+            <div style={{ fontWeight: 'bold', fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '12px' }}>
               Inspector Panel
             </div>
 
             {/* COMPONENT INSPECTOR */}
             {selectedNode && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>Selected Component</span>
-                  <div style={{ color: '#22d3ee', fontWeight: 'bold', fontSize: '13px', marginTop: '2px' }}>{selectedNode.id.toUpperCase()}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Component</span>
+                  <div style={{ color: '#22d3ee', fontWeight: 'bold', fontSize: '12px', marginTop: '2px' }}>{selectedNode.id.toUpperCase()}</div>
                 </div>
-                <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>Part Name</span>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Part Name</span>
                   <div style={{ color: '#f4f4f5', marginTop: '2px' }}>{selectedNode.data?.label}</div>
                 </div>
-                <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>Active Pin Terminals</span>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Active Pin Terminals</span>
                   <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     {selectedNode.data?.pins?.map((pin, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#a1a1aa', borderBottom: '1px solid #27272a', paddingBottom: '3px' }}>
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#a1a1aa', borderBottom: '1px solid #27272a', paddingBottom: '3px' }}>
                         <span>{pin.label || pin.id}</span>
                         <span style={{ color: '#34d399' }}>● active</span>
                       </div>
@@ -668,31 +726,31 @@ export default function Workspace() {
 
             {/* WIRE TRACE / NET INSPECTOR */}
             {selectedEdge && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>Selected Net Trace</span>
-                  <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '12px', marginTop: '4px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Net Trace</span>
+                  <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '11px', marginTop: '4px' }}>
                     {selectedEdge.label || selectedEdge.id}
                   </div>
                 </div>
 
-                <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>Net Origin (From)</span>
-                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '11px', marginTop: '2px' }}>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Net Origin (From)</span>
+                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
                     {selectedEdge.source.toUpperCase()} → Pin {selectedEdge.sourceHandle?.replace(/_(in|out)$/, '')}
                   </div>
                 </div>
 
-                <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>Net Destination (To)</span>
-                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '11px', marginTop: '2px' }}>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Net Destination (To)</span>
+                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
                     {selectedEdge.target.toUpperCase()} → Pin {selectedEdge.targetHandle?.replace(/_(in|out)$/, '')}
                   </div>
                 </div>
 
-                <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '10px', display: 'block', textTransform: 'uppercase' }}>Signal Rail Type</span>
-                  <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '11px', marginTop: '2px' }}>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Signal Rail Type</span>
+                  <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
                     {selectedEdge.style?.stroke === '#EF4444' ? '🔴 POWER RAIL (VCC/BAT+)' : 
                      selectedEdge.style?.stroke === '#10B981' ? '🟢 GROUND RETURN (GND/VSS)' : 
                      selectedEdge.style?.stroke === '#F59E0B' ? '🟠 COMMUNICATION BUS (I2C/UART)' : 
@@ -703,7 +761,7 @@ export default function Workspace() {
             )}
 
             {!selectedNode && !selectedEdge && (
-              <div style={{ color: '#71717a', fontStyle: 'italic', textAlign: 'center', padding: '24px 0' }}>
+              <div style={{ color: '#71717a', fontStyle: 'italic', textAlign: 'center', padding: '20px 0' }}>
                 Click any component card OR wire trace on the canvas to inspect details.
               </div>
             )}

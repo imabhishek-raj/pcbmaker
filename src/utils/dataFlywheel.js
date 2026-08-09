@@ -1,41 +1,45 @@
 // src/utils/dataFlywheel.js
 
-/**
- * Data Flywheel Logger
- * Captures user queries & generated netlists when DRC validation passes with 0 errors.
- */
+// 🚀 Live AWS Lambda Function URL Endpoint
+const AWS_FLYWHEEL_ENDPOINT = "https://vymp64t6naexrdp2xu7cuy6q2m0ogsth.lambda-url.ap-south-1.on.aws/";
+
 export async function logTrainingPair(userQuery, netlistResult, drcErrorCount) {
-  // Only collect high-quality pairs with 0 DRC errors
+  // 1. Guard Clause: Only save verified schematics with 0 DRC errors
   if (drcErrorCount > 0 || !userQuery || !netlistResult) return;
 
-  try {
-    const payload = {
-      timestamp: new Date().toISOString(),
-      prompt: userQuery,
-      completion: JSON.stringify(netlistResult)
-    };
+  const payload = {
+    timestamp: new Date().toISOString(),
+    prompt: userQuery,
+    completion: typeof netlistResult === 'string' ? netlistResult : JSON.stringify(netlistResult)
+  };
 
-    // Send payload to local storage cache / analytics endpoint
+  // 2. Local Fallback: Save to browser storage
+  try {
     const existingLogs = JSON.parse(localStorage.getItem('pcb_training_flywheel') || '[]');
     existingLogs.push(payload);
-    
-    // Keep up to 100 recent pairs locally before syncing
     if (existingLogs.length > 100) existingLogs.shift();
-    
     localStorage.setItem('pcb_training_flywheel', JSON.stringify(existingLogs));
-    console.log("💾 Data Flywheel: Logged 0-DRC error schematic pair for future fine-tuning!");
-  } catch (err) {
-    console.warn("Data Flywheel log failed:", err);
+  } catch (e) {
+    console.warn("Local storage flywheel error:", e);
   }
+
+  // 3. ☁️ Global Silent Auto-Sync to AWS S3
+  try {
+    fetch(AWS_FLYWHEEL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      mode: 'cors'
+    }).catch(() => {
+      // Fails silently in background so user flow is never interrupted
+    });
+  } catch (_) {}
 }
 
-/**
- * Export collected user pairs as JSONL format
- */
 export function exportFlywheelDataset() {
   const logs = JSON.parse(localStorage.getItem('pcb_training_flywheel') || '[]');
   if (logs.length === 0) {
-    alert("No flywheel training logs collected yet! Generate some 0-DRC schematics first.");
+    alert("No flywheel training logs collected in browser storage yet! Generate some 0-DRC schematics first.");
     return;
   }
 
