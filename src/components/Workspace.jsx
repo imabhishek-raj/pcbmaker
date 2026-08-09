@@ -54,7 +54,6 @@ const optimizePromptSpec = (rawQuery, previousHistory = []) => {
   const baseQuery = rawQuery.split('— Specs:')[0].trim();
   const q = baseQuery.toLowerCase();
 
-  // Multi-turn context thread construction (filtered to prevent context leak in prompt)
   let contextContextStr = '';
   if (previousHistory.length > 0) {
     const cleanHistory = previousHistory
@@ -67,27 +66,19 @@ const optimizePromptSpec = (rawQuery, previousHistory = []) => {
     }
   }
 
-  // 1. 4-bit / 8-bit CPUs & MCUs
   if (q.includes('4 bit') || q.includes('4-bit') || q.includes('8 bit') || q.includes('8-bit') || q.includes('atmega') || q.includes('avr') || q.includes('cpu')) {
     return `${baseQuery}${contextContextStr} — Specs: Include ATmega328P MCU (MCU1), AMS1117-3.3V Regulator (U1), 16MHz Crystal Oscillator (XTAL1), 10k Reset Resistor (R1), Reset Tactile Switch (SW1), and 100nF Cap (C1). Connect VCC, GND, RESET, XTAL1, and XTAL2.`;
   }
-
-  // 2. 32-Bit Microcontrollers
   if (q.includes('32 bit') || q.includes('32-bit') || q.includes('stm32') || q.includes('arm')) {
     return `${baseQuery}${contextContextStr} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
   }
-
-  // 3. Flight Controller / ESP32
   if (q.includes('flight controller') || q.includes('esp 32 mini') || q.includes('itself') || q.includes('bare') || (q.includes('esp') && !q.includes('bms') && !q.includes('led'))) {
     return `${baseQuery}${contextContextStr} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
   }
-
-  // 4. BMS / Protection
   if (q.includes('bms') || q.includes('battery protection') || q.includes('protection circuit')) {
     return `${baseQuery}${contextContextStr} — Specs: Include 3.7V Cell (BAT1), DW01A Protection IC (IC1), AO8810 Dual N-Channel MOSFET (MOS1), 100nF decoupling capacitor (C1), and 1kΩ CS current resistor (R1). Connect VCC, GND, OD, and OC control nets.`;
   }
 
-  // 5. Default Fallback with Context
   return `${baseQuery}${contextContextStr} — Specs: Standard EDA netlist layout with decoupling, verified pin routing, and continuous power/GND return loop.`;
 };
 
@@ -110,8 +101,11 @@ export default function Workspace() {
   const [edges, setEdges] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-  const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(true);
+  const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
+  const [isLeftCopilotOpen, setIsLeftCopilotOpen] = useState(true);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [selectedEdge, setSelectedEdge] = useState(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   const { 
     selectedNode, 
@@ -125,7 +119,22 @@ export default function Workspace() {
 
   const [inputMsg, setInputMsg] = useState('');
 
-  // Complete Reset Handler
+  // Handle responsive resize dynamically
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setIsRightDrawerOpen(false);
+        setIsLeftCopilotOpen(false);
+      } else {
+        setIsLeftCopilotOpen(true);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const handleFullReset = () => {
     setNodes([]);
     setEdges([]);
@@ -134,7 +143,6 @@ export default function Workspace() {
     clearChatHistory();
   };
 
-  // Live DRC Check Engine
   useEffect(() => {
     const warnings = runDRCCheck(nodes, edges);
     setDrcErrors(warnings);
@@ -213,9 +221,9 @@ export default function Workspace() {
       return;
     }
 
-    let fileContent = `(kicad_sch (version 20231120) (generator pcbmaker_org)\n`;
+    let fileContent = `(kicad_sch (version 20231120) (generator pcbmaker_in)\n`;
     fileContent += `  (paper "A4")\n`;
-    fileContent += `  (title_block\n    (title "AI Generated Schematic")\n    (company "pcbmaker.org - Made for the world, by India")\n  )\n\n`;
+    fileContent += `  (title_block\n    (title "AI Generated Schematic")\n    (company "pcbmaker.in - Made for the world, by India")\n  )\n\n`;
 
     nodes.forEach((node) => {
       const xPos = Math.round(node.position.x);
@@ -291,7 +299,6 @@ export default function Workspace() {
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
   };
 
-  // MULTI-TURN PERSISTENT GENERATION PIPELINE
   const handleSendMessage = async () => {
     if (!inputMsg.trim() || isLoading) return;
 
@@ -302,14 +309,12 @@ export default function Workspace() {
     setIsLoading(true);
 
     try {
-      // Pass chat history so the AI remembers previous prompts & components!
       const specRefinedPrompt = optimizePromptSpec(rawUserQuery, chatMessages);
       const ragEnhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
 
       const response = await generatePcbFromAmplify(ragEnhancedPrompt);
       const result = extractJsonFromOutput(response);
 
-      // Clean explanation message for chat UI
       let cleanExplanation = result?.explanation || "Circuit netlist updated on canvas.";
       cleanExplanation = cleanExplanation
         .replace(/\[Active Session Context:[\s\S]*?\]/g, '')
@@ -324,14 +329,12 @@ export default function Workspace() {
       const rawComponents = result?.components || result?.nodes || [];
       let rawConnections = result?.connections || result?.edges || [];
 
-      // Preserve existing nodes if this is a follow-up refinement
       const existingNodeMap = {};
       nodes.forEach(n => { existingNodeMap[n.id] = n; });
 
       const formattedNodes = [...nodes];
       const nodePinMap = {};
 
-      // Seed pin map from existing canvas
       nodes.forEach(n => {
         nodePinMap[n.id] = (n.data?.pins || []).map(p => p.id || p);
       });
@@ -354,7 +357,7 @@ export default function Workspace() {
           if (upper.includes('BAT') || upper.includes('CELL') || upper.includes('3.7V') || upper.includes('PWR') || upper.includes('AMS1117') || upper.includes('AP2112') || upper.includes('REG')) {
             primaryPowerNode = nodeId;
           }
-          if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32') || upper.includes('ATMEGA') || upper.includes('AVR') || upper.includes('CPU')) {
+          if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32') || upper.includes('ATMEGA') || upper.includes('CPU')) {
             primaryMcuNode = nodeId;
           }
           if (upper.includes('CP2102') || upper.includes('CH340') || upper.includes('USB')) {
@@ -371,7 +374,6 @@ export default function Workspace() {
           const currentY = columnYOffsets[col];
           columnYOffsets[col] += cardHeight + 40;
 
-          // Only add if not already present
           if (!existingNodeMap[nodeId]) {
             formattedNodes.push({
               id: nodeId,
@@ -422,19 +424,16 @@ export default function Workspace() {
         });
       };
 
-      // 1. LLM Connections
       if (Array.isArray(rawConnections) && rawConnections.length > 0) {
         rawConnections.forEach((conn) => {
           pushEdge(conn.source, conn.sourcePin, conn.target, conn.targetPin);
         });
       }
 
-      // 2. Regulator IN Pin to USB VBUS
       if (primaryPowerNode && usbNode && primaryPowerNode !== usbNode) {
         pushEdge(usbNode, 'VBUS', primaryPowerNode, 'IN');
       }
 
-      // 3. Universal Alias Net Resolver
       formattedNodes.forEach((node) => {
         const pins = nodePinMap[node.id] || [];
         pins.forEach((pId) => {
@@ -469,12 +468,10 @@ export default function Workspace() {
       setNodes(formattedNodes);
       setEdges(formattedEdges);
 
-      // Auto-trigger layout arrangement on incremental updates
       setTimeout(() => {
         handleAutoLayout();
       }, 50);
 
-      // Data Flywheel logging
       const currentErrors = runDRCCheck(formattedNodes, formattedEdges);
       if (currentErrors.length === 0 && typeof logTrainingPair === 'function') {
         logTrainingPair(rawUserQuery, result, currentErrors.length);
@@ -501,74 +498,112 @@ export default function Workspace() {
     };
   });
 
+  // Commercial EDA Uniform Header Button Style
+  const headerBtnStyle = {
+    height: '32px',
+    padding: '0 12px',
+    fontSize: '11px',
+    fontWeight: '600',
+    borderRadius: '6px',
+    border: '1px solid #27272a',
+    backgroundColor: '#18181b',
+    color: '#e4e4e7',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    whiteSpace: 'nowrap'
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', backgroundColor: '#09090b', color: '#f4f4f5', overflow: 'hidden', fontFamily: 'sans-serif' }}>
       
-      {/* HEADER */}
-      <header style={{ height: '48px', minHeight: '48px', borderBottom: '1px solid #27272a', backgroundColor: '#18181b', padding: '0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 20, flexWrap: 'nowrap', overflowX: 'auto' }}>
+      {/* UNIFORM RESPONSIVE HEADER */}
+      <header style={{ height: '52px', minHeight: '52px', borderBottom: '1px solid #27272a', backgroundColor: '#18181b', padding: '0 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 20, overflowX: 'auto' }}>
+        
+        {/* LOGO BRANDING WITH CUSTOM COLOR ACCENTS */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content' }}>
-          <span style={{ fontWeight: 'bold', color: '#22d3ee', fontSize: '16px' }}>pcbmaker.org</span>
-          <span style={{ fontSize: '10px', backgroundColor: '#2563eb', color: '#ffffff', padding: '2px 8px', borderRadius: '12px', fontWeight: '500', display: 'inline-block' }}>
+          {isMobile && (
+            <button 
+              onClick={() => setIsLeftCopilotOpen(!isLeftCopilotOpen)}
+              style={{ ...headerBtnStyle, padding: '0 8px', backgroundColor: '#27272a' }}
+            >
+              💬
+            </button>
+          )}
+
+          <span style={{ fontWeight: '800', fontSize: '18px', letterSpacing: '-0.4px', fontFamily: 'sans-serif' }}>
+            <span style={{ color: '#FF6B00' }}>pcb</span>
+            <span style={{ color: '#FFFFFF' }}>maker</span>
+            <span style={{ color: '#7171AA' }}>.</span>
+            <span style={{ color: '#10B981' }}>in</span>
+          </span>
+
+          <span style={{ fontSize: '9px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 7px', borderRadius: '12px', fontWeight: '600' }}>
             🇮🇳 India
           </span>
         </div>
 
+        {/* UNIFORM BUTTON TOOLBAR */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content' }}>
-          <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '9px', padding: '2px 6px', borderRadius: '12px', fontFamily: 'monospace' }}>
+          
+          <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', fontSize: '9px', padding: '5px 8px', borderRadius: '6px', fontFamily: 'monospace' }}>
             AWS: ACTIVE
           </span>
           
           <button 
             onClick={() => setIsRightDrawerOpen(!isRightDrawerOpen)}
             style={{ 
-              backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.15)' : '#1e293b', 
-              color: drcErrors.length > 0 ? '#ef4444' : '#38bdf8', 
-              fontSize: '11px', 
-              padding: '5px 10px', 
-              borderRadius: '4px', 
-              border: `1px solid ${drcErrors.length > 0 ? '#ef4444' : '#0284c7'}`, 
-              cursor: 'pointer', 
-              fontWeight: 'bold',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
+              ...headerBtnStyle,
+              borderColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', 
+              backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)', 
+              color: drcErrors.length > 0 ? '#ef4444' : '#34d399' 
             }}
           >
             <span>{isRightDrawerOpen ? '➡️ Hide DRC' : '🔍 DRC Inspector'}</span>
-            <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '8px', backgroundColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', color: '#ffffff' }}>
+            <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '10px', backgroundColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', color: '#ffffff', fontWeight: 'bold' }}>
               {drcErrors.length}
             </span>
           </button>
 
-          <button 
-            onClick={handleAutoLayout}
-            style={{ backgroundColor: '#1e293b', color: '#38bdf8', fontSize: '11px', padding: '5px 8px', borderRadius: '4px', border: '1px solid #0284c7', cursor: 'pointer', fontWeight: 'bold' }}
-          >
+          <button onClick={handleAutoLayout} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#38bdf8' }}>
             ✨ Layout
           </button>
           
-          <button 
-            onClick={exportFlywheelDataset}
-            style={{ backgroundColor: '#0284c7', color: '#ffffff', fontSize: '11px', padding: '5px 8px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
-            title="Export captured 0-DRC user prompts for LLM fine-tuning"
-          >
+          <button onClick={exportFlywheelDataset} style={{ ...headerBtnStyle, backgroundColor: '#0284c7', color: '#ffffff', border: 'none' }}>
             📥 Dataset
           </button>
           
-          <button 
-            onClick={handleExportKiCad}
-            style={{ backgroundColor: '#0891b2', color: '#ffffff', fontSize: '11px', padding: '5px 10px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: '500' }}
-          >
+          <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
             KiCad (.kicad_sch)
+          </button>
+
+          <button onClick={() => setIsAboutModalOpen(true)} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#a1a1aa' }}>
+            ℹ️ About
           </button>
         </div>
       </header>
 
-      {/* MAIN RESPONSIVE WORKSPACE CONTAINER */}
+      {/* WORKSPACE AREA */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         
-        {/* LEFT COPILOT PANEL */}
-        <aside style={{ width: '320px', minWidth: '280px', maxWidth: '340px', borderRight: '1px solid #27272a', backgroundColor: '#18181b', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
+        {/* LEFT COPILOT DRAWER (SLIDING ON MOBILE, FIXED ON DESKTOP) */}
+        <aside style={{ 
+          width: '320px', 
+          minWidth: isMobile ? '100vw' : '300px', 
+          maxWidth: '340px', 
+          borderRight: '1px solid #27272a', 
+          backgroundColor: '#18181b', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          zIndex: 40,
+          position: isMobile ? 'absolute' : 'relative',
+          top: 0, bottom: 0, left: 0,
+          transform: (isMobile && !isLeftCopilotOpen) ? 'translateX(-100%)' : 'translateX(0)',
+          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}>
           
           <ComponentPalette 
             isOpen={isPaletteOpen} 
@@ -582,14 +617,23 @@ export default function Workspace() {
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isLoading ? '#f59e0b' : '#10b981' }}></span>
             </span>
             
-            {/* RESTORED CLEAR CHAT & RESET BUTTON */}
-            <button 
-              onClick={handleFullReset}
-              style={{ backgroundColor: '#27272a', color: '#f43f5e', border: '1px solid #3f3f46', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
-              title="Clear chat and reset canvas"
-            >
-              🗑️ Clear
-            </button>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button 
+                onClick={handleFullReset}
+                style={{ backgroundColor: '#27272a', color: '#f43f5e', border: '1px solid #3f3f46', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                title="Clear chat and reset canvas"
+              >
+                🗑️ Clear
+              </button>
+              {isMobile && (
+                <button 
+                  onClick={() => setIsLeftCopilotOpen(false)}
+                  style={{ backgroundColor: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '14px' }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           <div style={{ flex: 1, padding: '10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'monospace', fontSize: '11px' }}>
@@ -618,7 +662,7 @@ export default function Workspace() {
             <button 
               onClick={handleSendMessage}
               disabled={isLoading}
-              style={{ backgroundColor: '#0891b2', fontSize: '11px', padding: '0 10px', borderRadius: '4px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '500' }}
+              style={{ backgroundColor: '#0891b2', fontSize: '11px', padding: '0 12px', borderRadius: '4px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '500' }}
             >
               Send
             </button>
@@ -642,6 +686,10 @@ export default function Workspace() {
             nodeTypes={nodeTypes}
             colorMode="dark"
             fitView
+            panOnScroll={true}
+            zoomOnPinch={true}
+            panOnDrag={true}
+            preventScrolling={false}
             isValidConnection={() => true}
             connectionLineType="step"
             connectionRadius={35}
@@ -652,14 +700,14 @@ export default function Workspace() {
           </ReactFlow>
         </main>
 
-        {/* RIGHT SLIDING DRAWER PANEL */}
+        {/* RIGHT DRC & INSPECTOR DRAWER */}
         <aside 
           style={{ 
             position: 'absolute',
             top: 0,
             right: 0,
             bottom: 0,
-            width: '320px', 
+            width: isMobile ? '100vw' : '320px', 
             backgroundColor: '#18181b', 
             borderLeft: '1px solid #27272a',
             padding: '16px', 
@@ -780,6 +828,36 @@ export default function Workspace() {
           </div>
         </aside>
       </div>
+
+      {/* ABOUT US & SUPPORT MODAL */}
+      {isAboutModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(4px)', padding: '16px'
+        }}>
+          <div style={{
+            backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px',
+            padding: '24px', width: '100%', maxWidth: '420px', fontFamily: 'monospace', color: '#f4f4f5'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '8px' }}>
+              <h3 style={{ margin: 0, color: '#00E5FF' }}>About pcbmaker.in</h3>
+              <button onClick={() => setIsAboutModalOpen(false)} style={{ background: 'none', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+            <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#a1a1aa', margin: '0 0 16px 0' }}>
+              <strong>pcbmaker.in</strong> is an AI-powered EDA Hardware Copilot engineered to accelerate schematic generation, netlist validation, and DRC verification on autopilot.
+            </p>
+            <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '6px', border: '1px solid #27272a' }}>
+              <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Direct Support & Contact</span>
+              <a href="mailto:support@pcbmaker.in" style={{ color: '#00E5FF', fontWeight: 'bold', textDecoration: 'none', fontSize: '13px' }}>
+                ✉️ support@pcbmaker.in
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
