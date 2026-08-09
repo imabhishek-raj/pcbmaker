@@ -20,6 +20,48 @@ import { logTrainingPair, exportFlywheelDataset } from '../utils/dataFlywheel';
 
 const nodeTypes = { icNode: ICNode };
 
+// Dynamic Slogans for Floating Canvas Banner
+const HERO_SLOGANS = [
+  "Transform Natural Language into KiCad Schematics in Seconds...",
+  "Zero Floating Pins with Real-Time DRC Rule Validation...",
+  "Synthesize Audio Amps, BMS Protection, and MCU Nodes Instantaneously...",
+  "Democratizing Electronics Prototyping for Hardware Creators..."
+];
+
+// Typewriter Component for Smooth Animated Text on Hero Overlay
+const TypewriterText = ({ texts }) => {
+  const [currentTextIndex, setCurrentTextIndex] = useState(0);
+  const [currentText, setCurrentText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    const fullText = texts[currentTextIndex];
+    const speed = isDeleting ? 30 : 60;
+
+    const timeout = setTimeout(() => {
+      if (!isDeleting && currentText === fullText) {
+        setTimeout(() => setIsDeleting(true), 1800);
+      } else if (isDeleting && currentText === '') {
+        setIsDeleting(false);
+        setCurrentTextIndex((prev) => (prev + 1) % texts.length);
+      } else {
+        setCurrentText(
+          fullText.substring(0, currentText.length + (isDeleting ? -1 : 1))
+        );
+      }
+    }, speed);
+
+    return () => clearTimeout(timeout);
+  }, [currentText, isDeleting, currentTextIndex, texts]);
+
+  return (
+    <span style={{ color: '#00E5FF', fontFamily: 'monospace', fontWeight: '600' }}>
+      {currentText}
+      <span style={{ animation: 'blink 1s infinite', color: '#00E5FF' }}>|</span>
+    </span>
+  );
+};
+
 // Signal Color Engine
 const getNetStyle = (srcPin = '', tgtPin = '') => {
   const p = `${srcPin} ${tgtPin}`.toUpperCase();
@@ -96,6 +138,66 @@ const extractJsonFromOutput = (rawResult) => {
   try { return JSON.parse(text); } catch (e) { return {}; }
 };
 
+// DETERMINISTIC DRC PIN AUTO-PATCHER
+const autoPatchFloatingPins = (currentNodes, currentEdges) => {
+  const patchedEdges = [...currentEdges];
+  const connectedPinKeys = new Set();
+
+  currentEdges.forEach(e => {
+    connectedPinKeys.add(`${e.source}:${e.sourceHandle?.replace(/_(in|out)$/, '')}`);
+    connectedPinKeys.add(`${e.target}:${e.targetHandle?.replace(/_(in|out)$/, '')}`);
+  });
+
+  const powerNode = currentNodes.find(n => {
+    const label = (n.data?.label || '').toUpperCase();
+    return label.includes('BAT') || label.includes('USB') || label.includes('AMS1117') || label.includes('AP2112') || label.includes('PWR');
+  });
+
+  if (!powerNode) return patchedEdges;
+
+  currentNodes.forEach((node) => {
+    const pins = node.data?.pins || [];
+    pins.forEach((pin) => {
+      const pinId = String(pin.id || pin).toUpperCase();
+      const pinKey = `${node.id}:${pin.id || pin}`;
+
+      if (!connectedPinKeys.has(pinKey) && node.id !== powerNode.id) {
+        if (['VCC', 'VDD', '3V3', 'VIN', 'INPL', 'INPR'].includes(pinId)) {
+          patchedEdges.push({
+            id: `auto_pwr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            source: powerNode.id,
+            sourceHandle: 'VCC_out',
+            target: node.id,
+            targetHandle: `${pin.id || pin}_in`,
+            type: 'step',
+            animated: true,
+            style: { stroke: '#EF4444', strokeWidth: 3 },
+            label: 'VCC AUTO-RAIL'
+          });
+          connectedPinKeys.add(pinKey);
+        }
+
+        if (['GND', 'VSS', '-'].includes(pinId)) {
+          patchedEdges.push({
+            id: `auto_gnd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            source: node.id,
+            sourceHandle: `${pin.id || pin}_out`,
+            target: powerNode.id,
+            targetHandle: 'GND_in',
+            type: 'step',
+            animated: true,
+            style: { stroke: '#10B981', strokeWidth: 2.5, strokeDasharray: '4' },
+            label: 'GND AUTO-RETURN'
+          });
+          connectedPinKeys.add(pinKey);
+        }
+      }
+    });
+  });
+
+  return patchedEdges;
+};
+
 export default function Workspace() {
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -104,8 +206,10 @@ export default function Workspace() {
   const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
   const [isLeftCopilotOpen, setIsLeftCopilotOpen] = useState(true);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [selectedEdge, setSelectedEdge] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [heroPromptInput, setHeroPromptInput] = useState('');
 
   const { 
     selectedNode, 
@@ -128,6 +232,7 @@ export default function Workspace() {
         setIsLeftCopilotOpen(false);
       } else {
         setIsLeftCopilotOpen(true);
+        setIsMobileMenuOpen(false);
       }
     };
     window.addEventListener('resize', handleResize);
@@ -175,7 +280,8 @@ export default function Workspace() {
         };
       });
     });
-  }, []);
+    if (isMobile) setIsMobileMenuOpen(false);
+  }, [isMobile]);
 
   const onConnect = useCallback(
     (params) => {
@@ -252,6 +358,7 @@ export default function Workspace() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    if (isMobile) setIsMobileMenuOpen(false);
   };
 
   const onDragOver = useCallback((event) => {
@@ -297,20 +404,22 @@ export default function Workspace() {
     };
     setNodes((nds) => [...nds, newNode]);
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
-    setIsPaletteOpen(false); // Auto-close drawer after adding
+    setIsPaletteOpen(false);
+    if (isMobile) setIsMobileMenuOpen(false);
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMsg.trim() || isLoading) return;
+  const executeGenerationQuery = async (queryText) => {
+    if (!queryText.trim() || isLoading) return;
 
-    const rawUserQuery = inputMsg;
-    setInputMsg('');
-    
-    addChatMessage({ sender: 'User', text: rawUserQuery });
+    if (isMobile) {
+      setIsLeftCopilotOpen(true);
+    }
+
+    addChatMessage({ sender: 'User', text: queryText });
     setIsLoading(true);
 
     try {
-      const specRefinedPrompt = optimizePromptSpec(rawUserQuery, chatMessages);
+      const specRefinedPrompt = optimizePromptSpec(queryText, chatMessages);
       const ragEnhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
 
       const response = await generatePcbFromAmplify(ragEnhancedPrompt);
@@ -466,16 +575,18 @@ export default function Workspace() {
         });
       });
 
+      const verifiedEdges = autoPatchFloatingPins(formattedNodes, formattedEdges);
+
       setNodes(formattedNodes);
-      setEdges(formattedEdges);
+      setEdges(verifiedEdges);
 
       setTimeout(() => {
         handleAutoLayout();
       }, 50);
 
-      const currentErrors = runDRCCheck(formattedNodes, formattedEdges);
+      const currentErrors = runDRCCheck(formattedNodes, verifiedEdges);
       if (currentErrors.length === 0 && typeof logTrainingPair === 'function') {
-        logTrainingPair(rawUserQuery, result, currentErrors.length);
+        logTrainingPair(queryText, result, currentErrors.length);
       }
 
     } catch (error) {
@@ -484,6 +595,21 @@ export default function Workspace() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSendMessage = () => {
+    if (!inputMsg.trim()) return;
+    const q = inputMsg;
+    setInputMsg('');
+    executeGenerationQuery(q);
+  };
+
+  const handleHeroSubmit = (e) => {
+    e.preventDefault();
+    if (!heroPromptInput.trim()) return;
+    const q = heroPromptInput;
+    setHeroPromptInput('');
+    executeGenerationQuery(q);
   };
 
   const styledEdges = edges.map((edge) => {
@@ -513,7 +639,6 @@ export default function Workspace() {
     justifyContent: 'center',
     gap: '6px',
     cursor: 'pointer',
-    transition: 'all 0.15s ease',
     whiteSpace: 'nowrap'
   };
 
@@ -524,10 +649,10 @@ export default function Workspace() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100vw', backgroundColor: '#09090b', color: '#f4f4f5', overflow: 'hidden', fontFamily: 'sans-serif' }}>
       
-      {/* TOOLBOX FLOATING DRAWER (CONDITIONALLY RENDERED ONLY WHEN isPaletteOpen IS TRUE) */}
+      {/* TOOLBOX FLOATING DRAWER OVERLAY */}
       {isPaletteOpen && (
         <div style={{
-          position: 'fixed', top: '60px', right: '80px', zIndex: 90,
+          position: 'fixed', top: '60px', right: isMobile ? '12px' : '80px', left: isMobile ? '12px' : 'auto', zIndex: 90,
           backgroundColor: '#18181b', border: '1px solid #00E5FF', borderRadius: '8px',
           boxShadow: '0 10px 30px rgba(0,0,0,0.8)', overflow: 'hidden'
         }}>
@@ -539,20 +664,22 @@ export default function Workspace() {
         </div>
       )}
 
-      {/* UNIFORM RESPONSIVE HEADER */}
-      <header style={{ height: '52px', minHeight: '52px', borderBottom: '1px solid #27272a', backgroundColor: '#18181b', padding: '0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 50, overflowX: 'auto' }}>
+      {/* COMPACT MOBILE-FIRST HEADER */}
+      <header style={{ 
+        height: '52px', 
+        minHeight: '52px', 
+        borderBottom: '1px solid #27272a', 
+        backgroundColor: '#18181b', 
+        padding: '0 12px', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between', 
+        zIndex: 50,
+        position: 'relative'
+      }}>
         
         {/* LOGO BRANDING */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content' }}>
-          {isMobile && (
-            <button 
-              onClick={() => setIsLeftCopilotOpen(!isLeftCopilotOpen)}
-              style={{ ...headerBtnStyle, padding: '0 8px', backgroundColor: '#27272a' }}
-            >
-              💬
-            </button>
-          )}
-
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontWeight: '800', fontSize: '18px', letterSpacing: '-0.4px', fontFamily: 'sans-serif' }}>
             <span style={{ color: '#FF6B00' }}>pcb</span>
             <span style={{ color: '#FFFFFF' }}>maker</span>
@@ -561,51 +688,120 @@ export default function Workspace() {
           </span>
         </div>
 
-        {/* UNIFORM BUTTON TOOLBAR */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 'max-content' }}>
+        {/* DESKTOP TOOLBAR (HORIZONTAL) */}
+        {!isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button 
+              onClick={() => setIsRightDrawerOpen(!isRightDrawerOpen)}
+              style={{ 
+                ...headerBtnStyle,
+                borderColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', 
+                backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)', 
+                color: drcErrors.length > 0 ? '#ef4444' : '#34d399' 
+              }}
+            >
+              <span>{isRightDrawerOpen ? '➡️ Hide DRC' : '🔍 DRC Inspector'}</span>
+              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '10px', backgroundColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', color: '#ffffff', fontWeight: 'bold' }}>
+                {drcErrors.length}
+              </span>
+            </button>
+
+            <button onClick={handleAutoLayout} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#38bdf8' }}>
+              ✨ Layout
+            </button>
+            
+            <button onClick={exportFlywheelDataset} style={{ ...headerBtnStyle, backgroundColor: '#0284c7', color: '#ffffff', border: 'none' }}>
+              📥 Dataset
+            </button>
+
+            <button onClick={() => setIsPaletteOpen(!isPaletteOpen)} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#00E5FF', borderColor: '#00E5FF' }}>
+              🧩 Toolbox
+            </button>
+            
+            <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
+              KiCad (.kicad_sch)
+            </button>
+
+            <button onClick={() => setIsAboutModalOpen(true)} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#a1a1aa' }}>
+              ℹ️ About
+            </button>
+          </div>
+        )}
+
+        {/* MOBILE CONTROLS (DRC BADGE + VERTICAL MENU TOGGLE) */}
+        {isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button 
+              onClick={() => setIsRightDrawerOpen(!isRightDrawerOpen)}
+              style={{ 
+                ...headerBtnStyle,
+                borderColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', 
+                backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)', 
+                color: drcErrors.length > 0 ? '#ef4444' : '#34d399',
+                padding: '0 8px'
+              }}
+            >
+              🔍 DRC ({drcErrors.length})
+            </button>
+
+            <button 
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              style={{ ...headerBtnStyle, backgroundColor: '#27272a', borderColor: '#00E5FF', color: '#00E5FF', padding: '0 10px', fontSize: '13px' }}
+            >
+              {isMobileMenuOpen ? '✕ Close' : '☰ Tools'}
+            </button>
+          </div>
+        )}
+      </header>
+
+      {/* MOBILE VERTICAL ACTION BAR (DROPS DOWN FROM TOP-LEFT) */}
+      {isMobile && isMobileMenuOpen && (
+        <div style={{
+          position: 'absolute',
+          top: '52px',
+          left: '12px',
+          zIndex: 80,
+          width: '210px',
+          backgroundColor: '#18181b',
+          border: '1px solid #27272a',
+          borderTop: 'none',
+          borderRadius: '0 0 8px 8px',
+          padding: '10px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.8)'
+        }}>
+          <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#71717a', textTransform: 'uppercase', marginBottom: '2px' }}>
+            ⚡ Mobile Action Bar
+          </span>
+
+          <button onClick={handleAutoLayout} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#27272a', color: '#38bdf8' }}>
+            ✨ Layout Canvas
+          </button>
           
-          <button 
-            onClick={() => setIsRightDrawerOpen(!isRightDrawerOpen)}
-            style={{ 
-              ...headerBtnStyle,
-              borderColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', 
-              backgroundColor: drcErrors.length > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)', 
-              color: drcErrors.length > 0 ? '#ef4444' : '#34d399' 
-            }}
-          >
-            <span>{isRightDrawerOpen ? '➡️ Hide DRC' : '🔍 DRC Inspector'}</span>
-            <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '10px', backgroundColor: drcErrors.length > 0 ? '#ef4444' : '#10b981', color: '#ffffff', fontWeight: 'bold' }}>
-              {drcErrors.length}
-            </span>
+          <button onClick={() => { setIsPaletteOpen(!isPaletteOpen); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#27272a', color: '#00E5FF', borderColor: '#00E5FF' }}>
+            🧩 Component Toolbox
           </button>
 
-          <button onClick={handleAutoLayout} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#38bdf8' }}>
-            ✨ Layout
-          </button>
-          
-          <button onClick={exportFlywheelDataset} style={{ ...headerBtnStyle, backgroundColor: '#0284c7', color: '#ffffff', border: 'none' }}>
-            📥 Dataset
+          <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
+            📄 KiCad (.kicad_sch)
           </button>
 
-          {/* TOOLBOX BUTTON PLACED NEXT TO DATASET */}
-          <button onClick={() => setIsPaletteOpen(!isPaletteOpen)} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#00E5FF', borderColor: '#00E5FF' }}>
-            🧩 Toolbox
-          </button>
-          
-          <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
-            KiCad (.kicad_sch)
+          <button onClick={exportFlywheelDataset} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#0284c7', color: '#ffffff', border: 'none' }}>
+            📥 Dataset Export
           </button>
 
-          <button onClick={() => setIsAboutModalOpen(true)} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#a1a1aa' }}>
-            ℹ️ About
+          <button onClick={() => { setIsAboutModalOpen(true); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#27272a', color: '#a1a1aa' }}>
+            ℹ️ About pcbmaker
           </button>
         </div>
-      </header>
+      )}
 
       {/* WORKSPACE AREA */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', height: 'calc(100dvh - 52px)' }}>
         
-        {/* LEFT COPILOT DRAWER (CLEAN, CHAT-ONLY) */}
+        {/* LEFT COPILOT DRAWER */}
         <aside style={{ 
           width: isMobile ? '100vw' : '320px', 
           minWidth: isMobile ? '100vw' : '300px', 
@@ -668,7 +864,7 @@ export default function Workspace() {
               disabled={isLoading}
               onChange={(e) => setInputMsg(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="e.g., now add a switch or status LED..."
+              placeholder="e.g., design a 5w usb speaker using pam8403..."
               style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '11px', padding: '8px', borderRadius: '4px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', width: '100%' }}
             />
             <button 
@@ -687,6 +883,156 @@ export default function Workspace() {
           onDrop={onDrop}
           style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative' }}
         >
+          {/* FLOATING ACTION COPILOT TRIGGER (BOTTOM LEFT OVERLAY FOR MOBILE & COMPACT CANVAS) */}
+          {(!isLeftCopilotOpen || isMobile) && (
+            <button
+              onClick={() => setIsLeftCopilotOpen(!isLeftCopilotOpen)}
+              style={{
+                position: 'absolute',
+                bottom: '24px',
+                left: '20px',
+                zIndex: 35,
+                backgroundColor: '#18181b',
+                border: '1px solid #00E5FF',
+                color: '#ffffff',
+                fontSize: '12px',
+                fontWeight: '700',
+                padding: '10px 16px',
+                borderRadius: '30px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 8px 24px rgba(0, 229, 255, 0.25)',
+                backdropFilter: 'blur(8px)'
+              }}
+            >
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 8px #10b981' }}></span>
+              <span>💬 AI Copilot</span>
+            </button>
+          )}
+
+          {/* HERO EMPTY-STATE OVERLAY (SHOWN WHEN CANVAS IS EMPTY) */}
+          {nodes.length === 0 && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px',
+              textAlign: 'center',
+              pointerEvents: 'none'
+            }}>
+              <div style={{
+                pointerEvents: 'auto',
+                maxWidth: '540px',
+                width: '100%',
+                backgroundColor: 'rgba(24, 24, 27, 0.85)',
+                backdropFilter: 'blur(16px)',
+                border: '1px solid rgba(39, 39, 42, 0.8)',
+                borderRadius: '20px',
+                padding: isMobile ? '24px 16px' : '36px 28px',
+                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '18px'
+              }}>
+                {/* CLEAN BADGE */}
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: 'rgba(0, 229, 255, 0.08)',
+                  border: '1px solid rgba(0, 229, 255, 0.3)',
+                  color: '#00E5FF',
+                  fontSize: '10px',
+                  fontWeight: '700',
+                  padding: '5px 12px',
+                  borderRadius: '20px',
+                  letterSpacing: '0.6px',
+                  textTransform: 'uppercase'
+                }}>
+                  <span>India's 1st Autonomous AI EDA Engine</span>
+                </div>
+
+                {/* MAIN TITLE */}
+                <h1 style={{
+                  fontSize: isMobile ? '22px' : '28px',
+                  fontWeight: '800',
+                  margin: 0,
+                  color: '#ffffff',
+                  letterSpacing: '-0.5px',
+                  lineHeight: '1.2'
+                }}>
+                  Design Hardware Circuits at the Speed of Thought
+                </h1>
+
+                {/* ANIMATED TYPEWRITER SLOGAN */}
+                <div style={{
+                  minHeight: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: isMobile ? '11px' : '13px',
+                  lineHeight: '1.4'
+                }}>
+                  <TypewriterText texts={HERO_SLOGANS} />
+                </div>
+
+                {/* HERO PROMPT FORM FOR DIRECT GENERATION */}
+                <form 
+                  onSubmit={handleHeroSubmit} 
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    gap: '8px',
+                    marginTop: '8px'
+                  }}
+                >
+                  <input
+                    value={heroPromptInput}
+                    disabled={isLoading}
+                    onChange={(e) => setHeroPromptInput(e.target.value)}
+                    placeholder="Type to build e.g. 5W USB Speaker, ESP32 Flight Controller..."
+                    style={{
+                      flex: 1,
+                      backgroundColor: '#09090b',
+                      border: '1px solid #27272a',
+                      fontSize: '12px',
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      color: '#f4f4f5',
+                      fontFamily: 'monospace',
+                      outline: 'none',
+                      boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)'
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    style={{
+                      backgroundColor: '#00E5FF',
+                      color: '#09090b',
+                      fontWeight: '700',
+                      fontSize: '12px',
+                      padding: '0 18px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    Build ⚡
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
           <ReactFlow
             nodes={nodes}
             edges={styledEdges}
@@ -945,6 +1291,10 @@ export default function Workspace() {
             @keyframes marquee {
               0% { transform: translateX(0%); }
               100% { transform: translateX(-50%); }
+            }
+            @keyframes blink {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0; }
             }
           `}</style>
         </div>
