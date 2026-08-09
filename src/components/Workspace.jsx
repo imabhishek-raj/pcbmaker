@@ -16,6 +16,7 @@ import { runDRCCheck } from '../utils/drcEngine';
 import { generatePcbFromAmplify } from '../utils/amplifyApi';
 import { getComponentPins } from '../utils/componentLibrary';
 import { buildRAGPrompt } from '../utils/promptEnhancer';
+import { logTrainingPair, exportFlywheelDataset } from '../utils/dataFlywheel';
 
 const nodeTypes = { icNode: ICNode };
 
@@ -267,7 +268,7 @@ export default function Workspace() {
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
   };
 
-  // MAIN GENERATION PIPELINE WITH RAG & FEW-SHOT ENHANCEMENT
+  // MAIN GENERATION PIPELINE WITH RAG, FEW-SHOT, AND DATA FLYWHEEL LOGGING
   const handleSendMessage = async () => {
     if (!inputMsg.trim() || isLoading) return;
 
@@ -282,7 +283,7 @@ export default function Workspace() {
       const specRefinedPrompt = optimizePromptSpec(rawUserQuery);
       
       // 2. Inject RAG Datasheet Pinouts & Few-Shot Engineering Rules
-      const ragEnhancedPrompt = buildRAGPrompt ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
+      const ragEnhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
       
       addChatMessage({ 
         sender: 'AI Copilot', 
@@ -461,6 +462,12 @@ export default function Workspace() {
       setNodes(formattedNodes);
       setEdges(formattedEdges);
 
+      // 🔄 DATA FLYWHEEL LOGGING: Save 0-DRC schematics for future fine-tuning
+      const currentErrors = runDRCCheck(formattedNodes, formattedEdges);
+      if (currentErrors.length === 0 && typeof logTrainingPair === 'function') {
+        logTrainingPair(rawUserQuery, result, currentErrors.length);
+      }
+
     } catch (error) {
       console.error("Pipeline Error:", error);
       addChatMessage({ sender: 'AI Copilot', text: `Backend error: ${error.message || 'Failed to process request.'}` });
@@ -508,6 +515,13 @@ export default function Workspace() {
             style={{ backgroundColor: '#27272a', color: '#a1a1aa', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', border: '1px solid #3f3f46', cursor: 'pointer' }}
           >
             Clear Chat
+          </button>
+          <button 
+            onClick={exportFlywheelDataset}
+            style={{ backgroundColor: '#0284c7', color: '#ffffff', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
+            title="Export captured 0-DRC user prompts for LLM fine-tuning"
+          >
+            📥 Export Dataset
           </button>
           <button 
             onClick={handleExportKiCad}
