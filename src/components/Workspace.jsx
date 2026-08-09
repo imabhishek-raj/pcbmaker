@@ -15,6 +15,7 @@ import ComponentPalette from './ComponentPalette';
 import { runDRCCheck } from '../utils/drcEngine';
 import { generatePcbFromAmplify } from '../utils/amplifyApi';
 import { getComponentPins } from '../utils/componentLibrary';
+import { buildRAGPrompt } from '../utils/promptEnhancer';
 
 const nodeTypes = { icNode: ICNode };
 
@@ -35,8 +36,8 @@ const getNetStyle = (srcPin = '', tgtPin = '') => {
 };
 
 const arePinsCompatible = (p1 = '', p2 = '') => {
-  const a = p1.toUpperCase();
-  const b = p2.toUpperCase();
+  const a = String(p1).toUpperCase();
+  const b = String(p2).toUpperCase();
 
   if (a === b) return true;
   if ((a.includes('TX') && b.includes('RX')) || (a.includes('RX') && b.includes('TX'))) return true;
@@ -109,7 +110,7 @@ export default function Workspace() {
 
   const [inputMsg, setInputMsg] = useState('');
 
-  // Live DRC Check
+  // Live DRC Check Engine
   useEffect(() => {
     const warnings = runDRCCheck(nodes, edges);
     setDrcErrors(warnings);
@@ -266,7 +267,7 @@ export default function Workspace() {
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
   };
 
-  // MAIN GENERATION PIPELINE
+  // MAIN GENERATION PIPELINE WITH RAG & FEW-SHOT ENHANCEMENT
   const handleSendMessage = async () => {
     if (!inputMsg.trim() || isLoading) return;
 
@@ -277,13 +278,19 @@ export default function Workspace() {
     setIsLoading(true);
 
     try {
-      const refinedPrompt = optimizePromptSpec(rawUserQuery);
+      // 1. Optimize Prompt Specs
+      const specRefinedPrompt = optimizePromptSpec(rawUserQuery);
+      
+      // 2. Inject RAG Datasheet Pinouts & Few-Shot Engineering Rules
+      const ragEnhancedPrompt = buildRAGPrompt ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
+      
       addChatMessage({ 
         sender: 'AI Copilot', 
-        text: `✨ Refined Specs: "${refinedPrompt}"` 
+        text: `✨ Refined Specs: "${specRefinedPrompt}"` 
       });
 
-      const response = await generatePcbFromAmplify(refinedPrompt);
+      // 3. Call Backend LLM
+      const response = await generatePcbFromAmplify(ragEnhancedPrompt);
       const result = extractJsonFromOutput(response);
 
       addChatMessage({ 
@@ -425,6 +432,7 @@ export default function Workspace() {
           );
 
           if (!isConnected) {
+            // Power / Ground Rails
             if (primaryPowerNode) {
               const powerPins = nodePinMap[primaryPowerNode] || ['1', '2'];
               const posPin = powerPins.find(p => p === '+' || p.includes('OUT') || p.includes('3V3') || p.includes('VCC') || p.includes('VDD') || p === '1') || powerPins[0];
@@ -437,6 +445,7 @@ export default function Workspace() {
               }
             }
 
+            // MCU Signal Aliases
             if (primaryMcuNode && node.id !== primaryMcuNode) {
               const mcuPins = nodePinMap[primaryMcuNode] || [];
               const matchPin = mcuPins.find(mPin => arePinsCompatible(mPin, pId));
@@ -448,6 +457,7 @@ export default function Workspace() {
         });
       });
 
+      // Update state AFTER all edge creation calls complete
       setNodes(formattedNodes);
       setEdges(formattedEdges);
 

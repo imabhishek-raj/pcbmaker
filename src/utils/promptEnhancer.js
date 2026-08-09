@@ -1,37 +1,34 @@
 // src/utils/promptEnhancer.js
+import { retrieveRAGContext } from './componentKnowledgeBase';
 
-export async function enhanceUserPrompt(rawInput) {
-  const enhancementSystemPrompt = `
-You are an expert Electronics & Hardware Systems Engineer.
-Your task is to take a raw, informal user request for a circuit and expand it into a precise, production-grade hardware engineering prompt.
+export function buildRAGPrompt(userPrompt) {
+  const ragContext = retrieveRAGContext(userPrompt) || '';
+
+  const systemInstructions = `
+You are a Principal Hardware EDA Engineer. Your job is to output a strictly valid JSON netlist for electronic schematics.
 
 RULES:
-1. Identify all required components, their standard reference designators (BAT1, SW1, R1, LED1, U1, etc.).
-2. Specify ideal operating voltages, pinout references, and passive component values (e.g. calculate current-limiting resistor values using Ohm's Law).
-3. Specify exact ground paths, power rails, and signal lines.
-4. Keep the output concise (2-3 sentences), technical, and direct. Do NOT add conversational filler.
+1. Output ONLY valid JSON matching the schema below. No conversational text outside JSON.
+2. Every active IC MUST have explicit power (VCC/3V3/VDD) and ground (GND/VSS) connections.
+3. Use exact pin names provided in the Knowledge Base context.
+4. Passives (Resistors, Capacitors, Switches, LEDs) must use pin "1" and pin "2".
 
-Example Input: "led circuit with 3.7v battery switch and resistor"
-Example Output: "Design a 3.7V LiPo-powered circuit featuring a 1S battery (BAT1), SPST switch (SW1) on the high side, a 220Ω current-limiting resistor (R1) calculated for 10mA LED forward current, and a 5mm indicator LED (LED1). Ensure a closed loop from LED Cathode back to BAT1 negative terminal."
+FEW-SHOT JSON EXAMPLE:
+{
+  "explanation": "ESP32 breakout with USB power, AMS1117 regulator, EN reset button, and CP2102 UART.",
+  "components": [
+    {"id": "MCU1", "name": "ESP32-WROOM-32", "pins": ["3V3", "GND", "EN", "TX", "RX"]},
+    {"id": "U1", "name": "AMS1117-3.3V", "pins": ["IN", "OUT", "GND"]},
+    {"id": "SW1", "name": "Reset Switch", "pins": ["1", "2"]}
+  ],
+  "connections": [
+    {"source": "U1", "sourcePin": "OUT", "target": "MCU1", "targetPin": "3V3"},
+    {"source": "U1", "sourcePin": "GND", "target": "MCU1", "targetPin": "GND"},
+    {"source": "MCU1", "sourcePin": "EN", "target": "SW1", "targetPin": "1"},
+    {"source": "SW1", "sourcePin": "2", "target": "MCU1", "targetPin": "GND"}
+  ]
+}
 `;
 
-  try {
-    // If you have a direct API endpoint or AWS Bedrock call for fast prompt expansion:
-    const response = await fetch('/api/enhance-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        systemPrompt: enhancementSystemPrompt,
-        userPrompt: rawInput 
-      })
-    });
-
-    if (!response.ok) throw new Error("Enhancement fallback");
-    const data = await response.json();
-    return data.enhancedPrompt || rawInput;
-  } catch (error) {
-    console.warn("Auto-enhancement bypassed, using original prompt:", error);
-    // Local client-side fallback enhancer if API is offline
-    return `${rawInput} — Optimized: Include proper decoupling, exact pin routing, and power return lines.`;
-  }
+  return `${systemInstructions}\n${ragContext}\nUSER PROMPT: "${userPrompt}"`;
 }
