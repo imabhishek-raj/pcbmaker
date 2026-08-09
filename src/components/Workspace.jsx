@@ -54,11 +54,17 @@ const optimizePromptSpec = (rawQuery, previousHistory = []) => {
   const baseQuery = rawQuery.split('— Specs:')[0].trim();
   const q = baseQuery.toLowerCase();
 
-  // Multi-turn context thread construction
+  // Multi-turn context thread construction (filtered to prevent context leak in prompt)
   let contextContextStr = '';
   if (previousHistory.length > 0) {
-    const lastSummary = previousHistory.slice(-4).map(m => `${m.sender}: ${m.text}`).join(' | ');
-    contextContextStr = ` [Active Session Context: ${lastSummary}]`;
+    const cleanHistory = previousHistory
+      .filter(m => !m.text.includes('✨ Refined Specs:'))
+      .slice(-4)
+      .map(m => `${m.sender}: ${m.text.replace(/\[Active Session Context:[\s\S]*?\]/g, '').trim()}`)
+      .join(' | ');
+    if (cleanHistory) {
+      contextContextStr = ` [Active Session Context: ${cleanHistory}]`;
+    }
   }
 
   // 1. 4-bit / 8-bit CPUs & MCUs
@@ -137,7 +143,7 @@ export default function Workspace() {
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
-  const handleAutoLayout = () => {
+  const handleAutoLayout = useCallback(() => {
     setNodes((nds) => {
       const columnYOffsets = { 0: 80, 1: 80, 2: 80, 3: 80 };
 
@@ -161,8 +167,7 @@ export default function Workspace() {
         };
       });
     });
-    addChatMessage({ sender: 'AI Copilot', text: "Auto-arranged canvas components into clean EDA schematic columns." });
-  };
+  }, []);
 
   const onConnect = useCallback(
     (params) => {
@@ -300,18 +305,20 @@ export default function Workspace() {
       // Pass chat history so the AI remembers previous prompts & components!
       const specRefinedPrompt = optimizePromptSpec(rawUserQuery, chatMessages);
       const ragEnhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
-      
-      addChatMessage({ 
-        sender: 'AI Copilot', 
-        text: `✨ Refined Specs: "${specRefinedPrompt}"` 
-      });
 
       const response = await generatePcbFromAmplify(ragEnhancedPrompt);
       const result = extractJsonFromOutput(response);
 
+      // Clean explanation message for chat UI
+      let cleanExplanation = result?.explanation || "Circuit netlist updated on canvas.";
+      cleanExplanation = cleanExplanation
+        .replace(/\[Active Session Context:[\s\S]*?\]/g, '')
+        .replace(/Refined Specs:[\s\S]*?\|/g, '')
+        .trim();
+
       addChatMessage({ 
         sender: 'AI Copilot', 
-        text: result?.explanation || "Circuit netlist updated on canvas." 
+        text: cleanExplanation 
       });
 
       const rawComponents = result?.components || result?.nodes || [];
@@ -461,6 +468,11 @@ export default function Workspace() {
 
       setNodes(formattedNodes);
       setEdges(formattedEdges);
+
+      // Auto-trigger layout arrangement on incremental updates
+      setTimeout(() => {
+        handleAutoLayout();
+      }, 50);
 
       // Data Flywheel logging
       const currentErrors = runDRCCheck(formattedNodes, formattedEdges);
