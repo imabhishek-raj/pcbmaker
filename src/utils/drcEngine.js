@@ -6,8 +6,8 @@ const arePinsCompatible = (p1 = '', p2 = '') => {
 
   if (a === b) return true;
   if ((a.includes('TX') && b.includes('RX')) || (a.includes('RX') && b.includes('TX'))) return true;
-  if ((a.includes('OUT') || a.includes('3V3') || a.includes('VCC') || a.includes('IN')) && 
-      (b.includes('OUT') || b.includes('3V3') || b.includes('VCC') || b.includes('IN'))) return true;
+  if ((a.includes('OUT') || a.includes('3V3') || a.includes('VCC') || a.includes('VDD') || a.includes('AVCC') || a.includes('IN') || a === '+') && 
+      (b.includes('OUT') || b.includes('3V3') || b.includes('VCC') || b.includes('VDD') || b.includes('AVCC') || b.includes('IN') || b === '+')) return true;
   if ((a.includes('GND') || a.includes('VSS') || a === '-') && (b.includes('GND') || b.includes('VSS') || b === '-')) return true;
   return false;
 };
@@ -18,6 +18,7 @@ export function runDRCCheck(nodes, edges) {
   const errors = [];
   const connectedHandles = new Set();
 
+  // Track all connected pins across edges
   edges.forEach((edge) => {
     if (edge.source && edge.sourceHandle) {
       const cleanSource = edge.sourceHandle.replace(/_(in|out)$/, '');
@@ -31,13 +32,24 @@ export function runDRCCheck(nodes, edges) {
 
   nodes.forEach((node) => {
     const pins = node.data?.pins || [];
-    let hasActiveConnection = false;
+    const nodeLabel = (node.data?.label || node.id).toUpperCase();
+
+    // Determine if the component is a passive / series component
+    const isPassiveOrDiscrete = 
+      nodeLabel.includes('RESISTOR') || /^R\d+/i.test(node.id) ||
+      nodeLabel.includes('CAPACITOR') || /^C\d+/i.test(node.id) ||
+      nodeLabel.includes('SWITCH') || /^SW\d+/i.test(node.id) ||
+      nodeLabel.includes('LED') || nodeLabel.includes('DIODE') || /^D\d+/i.test(node.id) ||
+      nodeLabel.includes('FUSE') || /^F\d+/i.test(node.id) ||
+      nodeLabel.includes('XTAL') || nodeLabel.includes('CRYSTAL') || /^X\d+/i.test(node.id);
+
+    let connectedPinCount = 0;
+    let hasActivePower = false;
 
     pins.forEach((pin) => {
       const pinId = String(typeof pin === 'string' ? pin : (pin.id || pin.label));
       const handleKey = `${node.id}:${pinId}`;
 
-      // Check direct or alias connection
       let isConnected = connectedHandles.has(handleKey);
 
       if (!isConnected) {
@@ -52,13 +64,28 @@ export function runDRCCheck(nodes, edges) {
         }
       }
 
-      // Ignore optional/unconnected expansion GPIOs or USB differential lines in DRC checks
-      const upperPin = pinId.toUpperCase();
-      const isOptionalPin = upperPin.includes('SDA') || upperPin.includes('SCL') || upperPin.includes('IO') || upperPin.includes('D+') || upperPin.includes('D-');
-
       if (isConnected) {
-        hasActiveConnection = true;
-      } else if (!isOptionalPin) {
+        connectedPinCount++;
+      }
+
+      const upperPin = pinId.toUpperCase();
+      const isPowerOrGnd = upperPin.includes('VCC') || upperPin.includes('3V3') || upperPin.includes('VDD') || 
+                            upperPin.includes('AVCC') || upperPin.includes('GND') || upperPin.includes('VSS') || 
+                            upperPin.includes('IN') || upperPin.includes('OUT') || upperPin === '+' || upperPin === '-';
+
+      if (isConnected && isPowerOrGnd) {
+        hasActivePower = true;
+      }
+
+      // Optional / GPIO / Debug Pin Exemption List
+      const isOptionalPin = upperPin.includes('SDA') || upperPin.includes('SCL') || upperPin.includes('IO') || 
+                            upperPin.includes('TX') || upperPin.includes('RX') || upperPin.includes('EN') || 
+                            upperPin.includes('NRST') || upperPin.includes('RESET') || upperPin.includes('XTAL') || 
+                            upperPin.includes('D+') || upperPin.includes('D-') || upperPin.includes('INT') ||
+                            upperPin.includes('SWD') || upperPin.includes('SWC') || upperPin.includes('CLK') ||
+                            upperPin.includes('BUS');
+
+      if (!isConnected && !isOptionalPin && !isPassiveOrDiscrete) {
         errors.push({
           id: `floating_${node.id}_${pinId}`,
           severity: 'warning',
@@ -67,7 +94,15 @@ export function runDRCCheck(nodes, edges) {
       }
     });
 
-    if (!hasActiveConnection && pins.length > 0) {
+    // PASSIVE RULE: Passives are valid as long as at least 1 pin is wired into the net trace
+    if (isPassiveOrDiscrete) {
+      if (connectedPinCount > 0) {
+        hasActivePower = true;
+      }
+    }
+
+    // ACTIVE IC RULE: Active ICs must have power rail connections
+    if (!hasActivePower && pins.length > 0) {
       errors.push({
         id: `nopower_${node.id}`,
         severity: 'error',

@@ -22,7 +22,7 @@ const nodeTypes = { icNode: ICNode };
 const getNetStyle = (srcPin = '', tgtPin = '') => {
   const p = `${srcPin} ${tgtPin}`.toUpperCase();
 
-  if (p.includes('3V3') || p.includes('VCC') || p.includes('VDD') || p.includes('VIN') || p.includes('OUT') || p.includes('BAT') || p.includes('VBUS') || p.includes('+')) {
+  if (p.includes('3V3') || p.includes('VCC') || p.includes('VDD') || p.includes('AVCC') || p.includes('VIN') || p.includes('OUT') || p.includes('BAT') || p.includes('VBUS') || p.includes('+')) {
     return { stroke: '#EF4444', strokeWidth: 3 };
   }
   if (p.includes('GND') || p.includes('VSS') || p.includes('CS') || p.includes('-')) {
@@ -40,9 +40,11 @@ const arePinsCompatible = (p1 = '', p2 = '') => {
 
   if (a === b) return true;
   if ((a.includes('TX') && b.includes('RX')) || (a.includes('RX') && b.includes('TX'))) return true;
-  if ((a.includes('OUT') || a.includes('3V3') || a.includes('VCC')) && (b.includes('OUT') || b.includes('3V3') || b.includes('VCC'))) return true;
+  if ((a.includes('OUT') || a.includes('3V3') || a.includes('VCC') || a.includes('VDD') || a.includes('AVCC')) && 
+      (b.includes('OUT') || b.includes('3V3') || b.includes('VCC') || b.includes('VDD') || b.includes('AVCC'))) return true;
   if ((a.includes('IN') || a.includes('VBUS') || a.includes('VIN')) && (b.includes('IN') || b.includes('VBUS') || b.includes('VIN'))) return true;
   if ((a.includes('GND') || a.includes('VSS') || a === '-') && (b.includes('GND') || b.includes('VSS') || b === '-')) return true;
+  if ((a.includes('RESET') || a.includes('NRST') || a.includes('EN')) && (b.includes('RESET') || b.includes('NRST') || b.includes('EN'))) return true;
   return false;
 };
 
@@ -50,19 +52,27 @@ const optimizePromptSpec = (rawQuery) => {
   const baseQuery = rawQuery.split('— Specs:')[0].trim();
   const q = baseQuery.toLowerCase();
 
-  if (q.includes('itself') || q.includes('bare') || q.includes('minimal esp') || (q.includes('esp') && !q.includes('flight') && !q.includes('bms') && !q.includes('led'))) {
-    return `${baseQuery} — Specs: Include ESP32-WROOM-32 MCU (MCU1), AMS1117-3.3V LDO Regulator (U1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), IO0 Boot Switch (SW2), 10uF Decoupling Cap (C1), and 100nF Filter Cap (C2). Connect 3V3, GND, TXD, RXD, EN, and IO0 nets.`;
+  // 1. 4-bit / 8-bit CPUs & MCUs
+  if (q.includes('4 bit') || q.includes('4-bit') || q.includes('8 bit') || q.includes('8-bit') || q.includes('atmega') || q.includes('avr') || q.includes('cpu')) {
+    return `${baseQuery} — Specs: Include ATmega328P MCU (MCU1), AMS1117-3.3V Regulator (U1), 16MHz Crystal Oscillator (XTAL1), 10k Reset Resistor (R1), Reset Tactile Switch (SW1), and 100nF Cap (C1). Connect VCC, GND, RESET, XTAL1, and XTAL2.`;
   }
+
+  // 2. 32-Bit Microcontrollers
+  if (q.includes('32 bit') || q.includes('32-bit') || q.includes('stm32') || q.includes('arm')) {
+    return `${baseQuery} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
+  }
+
+  // 3. Flight Controller / ESP32
+  if (q.includes('flight controller') || q.includes('esp 32 mini') || q.includes('itself') || q.includes('bare') || (q.includes('esp') && !q.includes('bms') && !q.includes('led'))) {
+    return `${baseQuery} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
+  }
+
+  // 4. BMS / Protection
   if (q.includes('bms') || q.includes('battery protection') || q.includes('protection circuit')) {
     return `${baseQuery} — Specs: Include 3.7V Cell (BAT1), DW01A Protection IC (IC1), AO8810 Dual N-Channel MOSFET (MOS1), 100nF decoupling capacitor (C1), and 1kΩ CS current resistor (R1). Connect VCC, GND, OD, and OC control nets.`;
   }
-  if (q.includes('led') && (q.includes('battery') || q.includes('lithium') || q.includes('circuit'))) {
-    return `${baseQuery} — Specs: Include 3.7V Li-ion Battery (BAT1), SPST Switch (SW1), 220Ω Resistor (R1), and Red LED (LED1). Connect BAT(+) -> SW1 -> R1 -> LED1 ANODE, with LED1 CATHODE returning to BAT(-).`;
-  }
-  if (q.includes('flight controller') || (q.includes('esp') && q.includes('mpu'))) {
-    return `${baseQuery} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), decoupling capacitors C1 (100nF) & C2 (10uF), and I2C pull-up resistor R1 (10kΩ). Provide full I2C and power net connections.`;
-  }
-  
+
+  // 5. Default Fallback
   return `${baseQuery} — Specs: Standard EDA netlist layout with decoupling, verified pin routing, and continuous power/GND return loop.`;
 };
 
@@ -120,8 +130,8 @@ export default function Workspace() {
         let col = 1;
 
         if (name.includes('USB') || name.includes('BAT') || name.includes('3.7V')) { col = 0; }
-        else if (name.includes('AMS1117') || name.includes('REG') || name.includes('CP2102') || name.includes('U1') || name.includes('U2')) { col = 1; }
-        else if (name.includes('ESP') || name.includes('MCU') || name.includes('STM32')) { col = 2; }
+        else if (name.includes('AMS1117') || name.includes('AP2112') || name.includes('REG') || name.includes('CP2102') || name.includes('U1') || name.includes('U2')) { col = 1; }
+        else if (name.includes('ESP') || name.includes('MCU') || name.includes('STM32') || name.includes('ATMEGA') || name.includes('CPU')) { col = 2; }
         else { col = 3; }
 
         const currentY = columnYOffsets[col];
@@ -256,6 +266,7 @@ export default function Workspace() {
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
   };
 
+  // MAIN GENERATION PIPELINE
   const handleSendMessage = async () => {
     if (!inputMsg.trim() || isLoading) return;
 
@@ -300,10 +311,10 @@ export default function Workspace() {
           nodePinMap[nodeId] = formattedPins.map(p => p.id);
 
           const upper = compName.toUpperCase();
-          if (upper.includes('BAT') || upper.includes('CELL') || upper.includes('3.7V') || upper.includes('PWR') || upper.includes('AMS1117') || upper.includes('REG')) {
+          if (upper.includes('BAT') || upper.includes('CELL') || upper.includes('3.7V') || upper.includes('PWR') || upper.includes('AMS1117') || upper.includes('AP2112') || upper.includes('REG')) {
             primaryPowerNode = nodeId;
           }
-          if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32')) {
+          if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32') || upper.includes('ATMEGA') || upper.includes('AVR') || upper.includes('CPU')) {
             primaryMcuNode = nodeId;
           }
           if (upper.includes('CP2102') || upper.includes('CH340') || upper.includes('USB')) {
@@ -312,8 +323,8 @@ export default function Workspace() {
 
           let col = 1;
           if (upper.includes('BAT') || upper.includes('CELL') || upper.includes('USB')) { col = 0; }
-          else if (upper.includes('AMS1117') || upper.includes('REG') || upper.includes('CP2102') || upper.includes('U1') || upper.includes('U2')) { col = 1; }
-          else if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32')) { col = 2; }
+          else if (upper.includes('AMS1117') || upper.includes('AP2112') || upper.includes('REG') || upper.includes('CP2102') || upper.includes('U1') || upper.includes('U2')) { col = 1; }
+          else if (upper.includes('ESP') || upper.includes('MCU') || upper.includes('STM32') || upper.includes('ATMEGA') || upper.includes('CPU')) { col = 2; }
           else { col = 3; }
 
           const cardHeight = Math.max(140, 60 + formattedPins.length * 26);
@@ -374,12 +385,38 @@ export default function Workspace() {
         });
       }
 
-      // 2. Specific Rule: Connect Regulator IN Pin to USB/Power Input VBUS
+      // 2. Connect Regulator IN Pin to USB VBUS
       if (primaryPowerNode && usbNode && primaryPowerNode !== usbNode) {
         pushEdge(usbNode, 'VBUS', primaryPowerNode, 'IN');
       }
 
-      // 3. Universal Alias Net Resolver
+      // 3. Connect Reset / Boot Switches to MCU
+      if (primaryMcuNode) {
+        formattedNodes.forEach((node) => {
+          const lbl = (node.data?.label || node.id).toUpperCase();
+          if (lbl.includes('SW1') || lbl.includes('RESET')) {
+            const mcuPins = nodePinMap[primaryMcuNode] || [];
+            const rstPin = mcuPins.find(p => p.includes('EN') || p.includes('RESET') || p.includes('NRST')) || 'RESET';
+            pushEdge(primaryMcuNode, rstPin, node.id, '1');
+          }
+        });
+      }
+
+      // 4. Connect Crystal Oscillators to MCU
+      if (primaryMcuNode) {
+        formattedNodes.forEach((node) => {
+          const lbl = (node.data?.label || node.id).toUpperCase();
+          if (lbl.includes('XTAL') || lbl.includes('CRYSTAL') || lbl.includes('X1')) {
+            const mcuPins = nodePinMap[primaryMcuNode] || [];
+            const x1Pin = mcuPins.find(p => p.includes('XTAL1') || p.includes('X1')) || 'XTAL1';
+            const x2Pin = mcuPins.find(p => p.includes('XTAL2') || p.includes('X2')) || 'XTAL2';
+            pushEdge(primaryMcuNode, x1Pin, node.id, '1');
+            pushEdge(primaryMcuNode, x2Pin, node.id, '2');
+          }
+        });
+      }
+
+      // 5. Universal Alias Net Resolver
       formattedNodes.forEach((node) => {
         const pins = nodePinMap[node.id] || [];
         pins.forEach((pId) => {
@@ -388,20 +425,18 @@ export default function Workspace() {
           );
 
           if (!isConnected) {
-            // Power / Ground Rails
             if (primaryPowerNode) {
               const powerPins = nodePinMap[primaryPowerNode] || ['1', '2'];
-              const posPin = powerPins.find(p => p === '+' || p.includes('OUT') || p.includes('3V3') || p.includes('VCC') || p === '1') || powerPins[0];
+              const posPin = powerPins.find(p => p === '+' || p.includes('OUT') || p.includes('3V3') || p.includes('VCC') || p.includes('VDD') || p === '1') || powerPins[0];
               const negPin = powerPins.find(p => p === '-' || p.includes('GND') || p.includes('VSS') || p === '2') || powerPins[1] || powerPins[0];
 
-              if (pId === '1' || pId === '+' || pId.includes('VCC') || pId.includes('3V3') || pId.includes('IN') || pId.includes('ANODE')) {
+              if (pId === '1' || pId === '+' || pId.includes('VCC') || pId.includes('3V3') || pId.includes('VDD') || pId.includes('AVCC') || pId.includes('IN') || pId.includes('ANODE')) {
                 if (node.id !== primaryPowerNode) pushEdge(primaryPowerNode, posPin, node.id, pId);
               } else if (pId === '2' || pId === '-' || pId.includes('GND') || pId.includes('VSS') || pId.includes('CATHODE')) {
                 if (node.id !== primaryPowerNode) pushEdge(node.id, pId, primaryPowerNode, negPin);
               }
             }
 
-            // MCU Signal Aliases (TXD/RXD -> TX/RX)
             if (primaryMcuNode && node.id !== primaryMcuNode) {
               const mcuPins = nodePinMap[primaryMcuNode] || [];
               const matchPin = mcuPins.find(mPin => arePinsCompatible(mPin, pId));
@@ -412,18 +447,7 @@ export default function Workspace() {
           }
         });
       });
-// 2.1 Route Reset & Boot Tactile Switches directly to MCU EN & IO0 pins
-if (primaryMcuNode) {
-  formattedNodes.forEach((node) => {
-    const lbl = (node.data?.label || node.id).toUpperCase();
-    if (lbl.includes('SW1') || lbl.includes('RESET')) {
-      pushEdge(primaryMcuNode, 'EN', node.id, '1');
-    }
-    if (lbl.includes('SW2') || lbl.includes('BOOT')) {
-      pushEdge(primaryMcuNode, 'IO0', node.id, '1');
-    }
-  });
-}
+
       setNodes(formattedNodes);
       setEdges(formattedEdges);
 
