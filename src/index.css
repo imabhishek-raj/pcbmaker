@@ -1,0 +1,67 @@
+/* src/index.css */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: #09090b;
+}
+
+/* ===================================================
+   MAGNETIC EDA HANDLE & ORTHOGONAL PREVIEW STYLING
+   =================================================== */
+
+/* Expanded Magnetic Hit-Box (28px x 28px) around every handle pin */
+.react-flow__handle {
+  transition: transform 0.15s ease-in-out, background-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  border-radius: 50%;
+  cursor: crosshair;
+}
+
+/* Handle Hover Aura */
+.react-flow__handle:hover,
+.react-flow__handle-connecting {
+  transform: scale(1.6) !important;
+  background-color: #00E5FF !important;
+  box-shadow: 0 0 14px #00E5FF, 0 0 6px #ffffff;
+}
+
+/* Live Drag Wire Trace Styling (Orthogonal 90°Cyan Line) */
+.react-flow__connectionline path {
+  stroke: #00E5FF !important;
+  stroke-width: 2.5px !important;
+  stroke-dasharray: 6;
+  animation: dashdraw 0.5s linear infinite;
+}
+
+@keyframes dashdraw {
+  from { stroke-dashoffset: 12; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* Edge Hover & Active Connection Highlight */
+.react-flow__edge-path {
+  transition: stroke-width 0.2s ease, stroke 0.2s ease;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #38bdf8 !important;
+  stroke-width: 3.5px !important;
+  cursor: pointer;
+}
