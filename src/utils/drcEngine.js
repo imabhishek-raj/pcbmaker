@@ -34,12 +34,13 @@ export function runDRCCheck(nodes, edges) {
     const pins = node.data?.pins || [];
     const nodeLabel = (node.data?.label || node.id).toUpperCase();
 
-    // Determine if the component is a passive / series component
+    // Determine if component is passive or discrete switch (MOSFETs, Switches, Resistors, LEDs, Fuses)
     const isPassiveOrDiscrete = 
       nodeLabel.includes('RESISTOR') || /^R\d+/i.test(node.id) ||
       nodeLabel.includes('CAPACITOR') || /^C\d+/i.test(node.id) ||
       nodeLabel.includes('SWITCH') || /^SW\d+/i.test(node.id) ||
       nodeLabel.includes('LED') || nodeLabel.includes('DIODE') || /^D\d+/i.test(node.id) ||
+      nodeLabel.includes('MOSFET') || /^MOS\d+/i.test(node.id) || /^Q\d+/i.test(node.id) ||
       nodeLabel.includes('FUSE') || /^F\d+/i.test(node.id) ||
       nodeLabel.includes('XTAL') || nodeLabel.includes('CRYSTAL') || /^X\d+/i.test(node.id);
 
@@ -77,8 +78,9 @@ export function runDRCCheck(nodes, edges) {
         hasActivePower = true;
       }
 
-      // Optional / GPIO / Debug Pin Exemption List
-      const isOptionalPin = upperPin.includes('SDA') || upperPin.includes('SCL') || upperPin.includes('IO') || 
+      // Optional / GPIO / Debug / Test Pin Exemption List
+      const isOptionalPin = upperPin.includes('TD') || upperPin.includes('NC') ||
+                            upperPin.includes('SDA') || upperPin.includes('SCL') || upperPin.includes('IO') || 
                             upperPin.includes('TX') || upperPin.includes('RX') || upperPin.includes('EN') || 
                             upperPin.includes('NRST') || upperPin.includes('RESET') || upperPin.includes('XTAL') || 
                             upperPin.includes('D+') || upperPin.includes('D-') || upperPin.includes('INT') ||
@@ -94,7 +96,7 @@ export function runDRCCheck(nodes, edges) {
       }
     });
 
-    // PASSIVE RULE: Passives are valid as long as at least 1 pin is wired into the net trace
+    // PASSIVE RULE: Passives / MOSFETs are valid as long as at least 1 pin is wired into the net trace
     if (isPassiveOrDiscrete) {
       if (connectedPinCount > 0) {
         hasActivePower = true;
