@@ -3,11 +3,11 @@ import { retrieveRAGContext } from './componentKnowledgeBase';
 
 export function buildRAGPrompt(userPrompt) {
   const ragContext = retrieveRAGContext(userPrompt) || '';
-
-  // Minimal, direct hardware spec injection
+  
+  // Minimal spec injection so the LLM doesn't echo paragraphs
   if (ragContext) {
-    return `${userPrompt}\n${ragContext}\nOutput ONLY valid schematic JSON.`;
+    return `${userPrompt}. Rules: ${ragContext}`;
   }
 
-  return `${userPrompt}\nOutput ONLY valid schematic JSON with components and connections.`;
+  return userPrompt;
 }
