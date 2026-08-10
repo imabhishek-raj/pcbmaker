@@ -349,7 +349,6 @@ export default function Workspace() {
       const updatedEdges = addEdge(newEdge, edges);
       setEdges(updatedEdges);
       
-      // Enforce immediate DRC validation on manual wiring
       const validationErrors = runDRCCheck(nodes, updatedEdges);
       setDrcErrors(validationErrors);
 
@@ -855,7 +854,7 @@ export default function Workspace() {
       {/* WORKSPACE AREA */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', height: 'calc(100dvh - 52px)' }}>
         
-        {/* LEFT COPILOT DRAWER */}
+        {/* LEFT COPILOT DRAWER (SLIDES IN FROM LEFT) */}
         <aside style={{ 
           width: isMobile ? '100vw' : '320px', 
           minWidth: isMobile ? '100vw' : '300px', 
@@ -868,63 +867,63 @@ export default function Workspace() {
           position: isMobile ? 'absolute' : 'relative',
           top: 0, bottom: 0, left: 0,
           height: '100%',
-          transform: (isMobile && !isLeftCopilotOpen) ? 'translateX(-100%)' : 'translateX(0)',
+          transform: (isMobile && !isLeftCopilotOpen) ? 'translateX(-100%)' : (!isLeftCopilotOpen ? 'translateX(-100%)' : 'translateX(0)'),
           transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         }}>
 
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid #27272a', fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid #27272a', fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               AI Hardware Copilot
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: isLoading ? '#f59e0b' : '#10b981' }}></span>
             </span>
             
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
               <button 
                 onClick={handleFullReset}
-                style={{ backgroundColor: '#27272a', color: '#f43f5e', border: '1px solid #3f3f46', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                style={{ backgroundColor: '#27272a', color: '#f43f5e', border: '1px solid #3f3f46', fontSize: '10px', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
                 title="Clear chat and reset canvas"
               >
                 🗑️ Clear
               </button>
-              {isMobile && (
-                <button 
-                  onClick={() => setIsLeftCopilotOpen(false)}
-                  style={{ backgroundColor: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '14px' }}
-                >
-                  ✕
-                </button>
-              )}
+              <button 
+                onClick={() => setIsLeftCopilotOpen(false)}
+                style={{ backgroundColor: '#27272a', border: '1px solid #3f3f46', color: '#f4f4f5', cursor: 'pointer', fontSize: '12px', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Close drawer"
+              >
+                ✕
+              </button>
             </div>
           </div>
 
-          <div style={{ flex: 1, padding: '10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'monospace', fontSize: '11px' }}>
+          <div style={{ flex: 1, padding: '12px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'monospace', fontSize: '11px' }}>
             {chatMessages.map((m, i) => (
-              <div key={i} style={{ padding: '8px 10px', borderRadius: '6px', border: '1px solid #27272a', backgroundColor: m.sender.includes('AI') ? '#27272a' : '#083344', color: m.sender.includes('AI') ? '#67e8f9' : '#f4f4f5', marginLeft: m.sender.includes('AI') ? '0' : '12px' }}>
-                <div style={{ fontSize: '9px', color: '#71717a', marginBottom: '3px', fontWeight: 'bold', textTransform: 'uppercase' }}>{m.sender}</div>
+              <div key={i} style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid #27272a', backgroundColor: m.sender.includes('AI') ? '#27272a' : '#083344', color: m.sender.includes('AI') ? '#67e8f9' : '#f4f4f5', marginLeft: m.sender.includes('AI') ? '0' : '12px' }}>
+                <div style={{ fontSize: '9px', color: '#71717a', marginBottom: '4px', fontWeight: 'bold', textTransform: 'uppercase' }}>{m.sender}</div>
                 {m.text}
               </div>
             ))}
             {isLoading && (
-              <div style={{ color: '#f59e0b', fontSize: '11px', fontStyle: 'italic' }}>
-                Refining specs & updating netlist wires...
+              <div style={{ padding: '10px', borderRadius: '6px', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#f59e0b', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ animation: 'spin 1s linear infinite' }}>⚙️</span>
+                <span>Thinking & synthesizing netlist wires...</span>
               </div>
             )}
           </div>
 
           {/* CHAT INPUT AREA FIXED TO BOTTOM */}
-          <div style={{ padding: '10px', borderTop: '1px solid #27272a', display: 'flex', gap: '6px', backgroundColor: '#18181b', paddingBottom: isMobile ? '20px' : '10px' }}>
+          <div style={{ padding: '12px', borderTop: '1px solid #27272a', display: 'flex', gap: '8px', backgroundColor: '#18181b', paddingBottom: isMobile ? '24px' : '12px' }}>
             <input 
               value={inputMsg}
               disabled={isLoading}
               onChange={(e) => setInputMsg(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
               placeholder="e.g., design a 5w usb speaker using pam8403..."
-              style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '11px', padding: '8px', borderRadius: '4px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', width: '100%' }}
+              style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '11px', padding: '10px', borderRadius: '6px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', width: '100%' }}
             />
             <button 
               onClick={handleSendMessage}
               disabled={isLoading}
-              style={{ backgroundColor: '#0891b2', fontSize: '11px', padding: '0 12px', borderRadius: '4px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '500' }}
+              style={{ backgroundColor: '#0891b2', fontSize: '11px', padding: '0 14px', borderRadius: '6px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '600' }}
             >
               Send
             </button>
@@ -937,21 +936,21 @@ export default function Workspace() {
           onDrop={onDrop}
           style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative' }}
         >
-          {/* FLOATING ACTION COPILOT TRIGGER (BOTTOM LEFT OVERLAY FOR MOBILE & COMPACT CANVAS) */}
-          {(!isLeftCopilotOpen || isMobile) && (
+          {/* FLOATING ACTION COPILOT TRIGGER (NOW MOVED TO THE RIGHT SIDE) */}
+          {!isLeftCopilotOpen && (
             <button
-              onClick={() => setIsLeftCopilotOpen(!isLeftCopilotOpen)}
+              onClick={() => setIsLeftCopilotOpen(true)}
               style={{
                 position: 'absolute',
                 bottom: '24px',
-                left: '20px',
+                right: '24px',
                 zIndex: 35,
                 backgroundColor: '#18181b',
                 border: '1px solid #00E5FF',
                 color: '#ffffff',
                 fontSize: '12px',
                 fontWeight: '700',
-                padding: '10px 16px',
+                padding: '12px 20px',
                 borderRadius: '30px',
                 cursor: 'pointer',
                 display: 'flex',
@@ -1349,6 +1348,10 @@ export default function Workspace() {
             @keyframes blink {
               0%, 100% { opacity: 1; }
               50% { opacity: 0; }
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
             }
           `}</style>
         </div>
