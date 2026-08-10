@@ -1087,29 +1087,31 @@ export default function Workspace() {
           )}
 
           <ReactFlow
-            nodes={nodes}
-            edges={styledEdges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onEdgeClick={handleEdgeClick}
-            onNodeClick={handleNodeClick}
-            nodeTypes={nodeTypes}
-            colorMode="dark"
-            fitView
-            panOnScroll={true}
-            zoomOnPinch={true}
-            panOnDrag={true}
-            preventScrolling={false}
-            isValidConnection={() => true}
-            connectionLineType="step"
-            connectionRadius={35}
-            connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
-          >
-            <Background color="#27272a" gap={20} size={1} />
-            <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
-          </ReactFlow>
-        </main>
+  nodes={nodes}
+  edges={styledEdges}
+  onNodesChange={onNodesChange}
+  onEdgesChange={onEdgesChange}
+  onConnect={onConnect}
+  onEdgeClick={handleEdgeClick}
+  onNodeClick={handleNodeClick}
+  nodeTypes={nodeTypes}
+  colorMode="dark"
+  fitView
+  panOnScroll={true}
+  zoomOnPinch={true}
+  panOnDrag={!isMobile} // 👈 Prevents full-screen touch gesture conflicts on mobile devices
+  preventScrolling={true}
+  nodeOrigin={[0.5, 0.5]}
+  isValidConnection={() => true}
+  connectionLineType="step"
+  connectionRadius={35}
+  connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
+>
+  <Background color="#27272a" gap={20} size={1} />
+  <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
+</ReactFlow>
+
+</main>
 
         {/* RIGHT DRC & INSPECTOR DRAWER */}
         <aside 
