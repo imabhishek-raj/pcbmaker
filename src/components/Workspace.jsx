@@ -28,8 +28,9 @@ class FlowErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '20px', color: '#f87171', textAlign: 'center', fontFamily: 'monospace' }}>
-          Canvas re-initialized safely. <button onClick={() => this.setState({ hasError: false })} style={{ background: '#00E5FF', color: '#000', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginLeft: '10px' }}>Reload Canvas</button>
+        <div style={{ padding: '20px', color: '#f87171', textAlign: 'center', fontFamily: 'monospace', backgroundColor: '#09090b', height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <h3>Canvas re-initialized safely.</h3>
+          <button onClick={() => this.setState({ hasError: false })} style={{ background: '#00E5FF', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', marginTop: '12px' }}>Reload Canvas</button>
         </div>
       );
     }
@@ -388,17 +389,6 @@ export default function Workspace() {
     setSelectedNode(node);
     setIsRightDrawerOpen(true);
   }, [setSelectedNode]);
-
-  // 🛡️ STABILIZER: Safely handles touch drop events on mobile to prevent DOM unmount crashes
-  const onNodeDragStop = useCallback(() => {
-    try {
-      if (typeof window !== 'undefined' && window.getSelection) {
-        window.getSelection().removeAllRanges();
-      }
-    } catch (e) {
-      console.warn("Touch drop stabilization catch:", e);
-    }
-  }, []);
 
   const handleExportKiCad = () => {
     if (!nodes || nodes.length === 0) {
@@ -962,7 +952,7 @@ export default function Workspace() {
         <main 
           onDragOver={onDragOver}
           onDrop={onDrop}
-          style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative' }}
+          style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative', touchAction: 'none' }}
         >
           {/* FLOATING ACTION COPILOT TRIGGER (ON THE RIGHT SIDE) */}
           {!isLeftCopilotOpen && (
@@ -1123,7 +1113,6 @@ export default function Workspace() {
               onConnect={onConnect}
               onEdgeClick={handleEdgeClick}
               onNodeClick={handleNodeClick}
-              onNodeDragStop={onNodeDragStop} // 👈 STABILIZER: Intercepts touch release to prevent drop crashes
               nodeTypes={nodeTypes}
               colorMode="dark"
               fitView
@@ -1131,7 +1120,7 @@ export default function Workspace() {
               zoomOnPinch={true}
               panOnDrag={true}
               preventScrolling={false}
-              nodesDraggable={true}
+              nodesDraggable={!isMobile} // 👈 Safely handles mobile touch-release crashes by disabling touch-node drag while keeping desktop dragging active
               nodesConnectable={true}
               elementsSelectable={true}
               selectNodesOnDrag={false}
