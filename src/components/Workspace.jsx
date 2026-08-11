@@ -1104,30 +1104,37 @@ export default function Workspace() {
           )}
 
           <FlowErrorBoundary>
-            <ReactFlow
-              nodes={nodes}
-              edges={styledEdges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onEdgeClick={handleEdgeClick}
-              onNodeClick={handleNodeClick}
-              nodeTypes={nodeTypes}
-              colorMode="dark"
-              fitView
-              panOnScroll={true}
-              zoomOnPinch={true}
-              panOnDrag={true}
-              preventScrolling={false}
-              isValidConnection={() => true}
-              connectionLineType="step"
-              connectionRadius={35}
-              connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
-            >
-              <Background color="#27272a" gap={20} size={1} />
-              <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
-            </ReactFlow>
-          </FlowErrorBoundary>
+  <ReactFlow
+    nodes={nodes}
+    edges={styledEdges}
+    onNodesChange={onNodesChange}
+    onEdgesChange={onEdgesChange}
+    onConnect={onConnect}
+    onEdgeClick={handleEdgeClick}
+    onNodeClick={handleNodeClick}
+    nodeTypes={nodeTypes}
+    colorMode="dark"
+    fitView
+    panOnScroll={true}
+    zoomOnPinch={true}
+    panOnDrag={true}
+    preventScrolling={false}
+    nodesDraggable={true} // 👈 Keep it TRUE for mobile and desktop!
+    nodesConnectable={true}
+    elementsSelectable={true}
+    selectNodesOnDrag={false}
+    elevateNodesOnSelect={true}
+    onlyRenderVisibleElements={true} // 👈 CRITICAL: Prevents heavy mobile DOM re-renders during fast drags
+    fitViewOptions={{ padding: 0.2 }}
+    isValidConnection={() => true}
+    connectionLineType="step"
+    connectionRadius={35}
+    connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
+  >
+    <Background color="#27272a" gap={20} size={1} />
+    <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
+  </ReactFlow>
+</FlowErrorBoundary>
         </main>
 
         {/* RIGHT DRC & INSPECTOR DRAWER */}
