@@ -1,5 +1,5 @@
 // src/components/Workspace.jsx
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, Component } from 'react';
 import { 
   ReactFlow, 
   Background, 
@@ -19,6 +19,23 @@ import { buildRAGPrompt } from '../utils/promptEnhancer';
 import { logTrainingPair, exportFlywheelDataset } from '../utils/dataFlywheel';
 
 const nodeTypes = { icNode: ICNode };
+
+// Simple Error Boundary to catch canvas rendering crashes on mobile touch
+class FlowErrorBoundary extends Component {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error, info) { console.error("Canvas Error:", error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '20px', color: '#f87171', textAlign: 'center', fontFamily: 'monospace' }}>
+          Canvas re-initialized safely. <button onClick={() => this.setState({ hasError: false })} style={{ background: '#00E5FF', color: '#000', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', marginLeft: '10px' }}>Reload Canvas</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Dynamic Slogans for Floating Canvas Banner
 const HERO_SLOGANS = [
@@ -867,7 +884,7 @@ export default function Workspace() {
           position: isMobile ? 'absolute' : 'relative',
           top: 0, bottom: 0, left: 0,
           height: '100%',
-          transform: (isMobile && !isLeftCopilotOpen) ? 'translateX(-100%)' : (!isLeftCopilotOpen ? 'translateX(-100%)' : 'translateX(0)'),
+          transform: isLeftCopilotOpen ? 'translateX(0)' : 'translateX(-100%)',
           transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         }}>
 
@@ -936,7 +953,7 @@ export default function Workspace() {
           onDrop={onDrop}
           style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative' }}
         >
-          {/* FLOATING ACTION COPILOT TRIGGER (NOW MOVED TO THE RIGHT SIDE) */}
+          {/* FLOATING ACTION COPILOT TRIGGER (ON THE RIGHT SIDE) */}
           {!isLeftCopilotOpen && (
             <button
               onClick={() => setIsLeftCopilotOpen(true)}
@@ -1086,32 +1103,32 @@ export default function Workspace() {
             </div>
           )}
 
-          <ReactFlow
-  nodes={nodes}
-  edges={styledEdges}
-  onNodesChange={onNodesChange}
-  onEdgesChange={onEdgesChange}
-  onConnect={onConnect}
-  onEdgeClick={handleEdgeClick}
-  onNodeClick={handleNodeClick}
-  nodeTypes={nodeTypes}
-  colorMode="dark"
-  fitView
-  panOnScroll={true}
-  zoomOnPinch={true}
-  panOnDrag={!isMobile} // 👈 Prevents full-screen touch gesture conflicts on mobile devices
-  preventScrolling={true}
-  nodeOrigin={[0.5, 0.5]}
-  isValidConnection={() => true}
-  connectionLineType="step"
-  connectionRadius={35}
-  connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
->
-  <Background color="#27272a" gap={20} size={1} />
-  <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
-</ReactFlow>
-
-</main>
+          <FlowErrorBoundary>
+            <ReactFlow
+              nodes={nodes}
+              edges={styledEdges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onEdgeClick={handleEdgeClick}
+              onNodeClick={handleNodeClick}
+              nodeTypes={nodeTypes}
+              colorMode="dark"
+              fitView
+              panOnScroll={true}
+              zoomOnPinch={true}
+              panOnDrag={true}
+              preventScrolling={false}
+              isValidConnection={() => true}
+              connectionLineType="step"
+              connectionRadius={35}
+              connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
+            >
+              <Background color="#27272a" gap={20} size={1} />
+              <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
+            </ReactFlow>
+          </FlowErrorBoundary>
+        </main>
 
         {/* RIGHT DRC & INSPECTOR DRAWER */}
         <aside 
