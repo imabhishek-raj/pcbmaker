@@ -15,7 +15,8 @@ const ICNode = memo(({ id, data, selected }) => {
       minWidth: '170px',
       fontFamily: 'monospace',
       color: '#f4f4f5',
-      position: 'relative'
+      position: 'relative',
+      touchAction: 'none' // 👈 Prevents mobile browser touch/drag gesture collisions
     }}>
       {/* Component Title */}
       <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#22d3ee', marginBottom: '8px', borderBottom: '1px solid #27272a', paddingBottom: '4px' }}>
