@@ -16,7 +16,10 @@ const ICNode = memo(({ id, data, selected }) => {
       fontFamily: 'monospace',
       color: '#f4f4f5',
       position: 'relative',
-      touchAction: 'none' // 👈 Prevents mobile browser touch/drag gesture collisions
+      touchAction: 'none',           // Prevents mobile scroll/drag gesture collisions
+      userSelect: 'none',            // Prevents text selection highlighting during drags
+      WebkitUserSelect: 'none',      // Safari/Mobile browser support for selection lock
+      WebkitTouchCallout: 'none'     // Prevents mobile callout menus on long press/fast drag
     }}>
       {/* Component Title */}
       <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#22d3ee', marginBottom: '8px', borderBottom: '1px solid #27272a', paddingBottom: '4px' }}>
