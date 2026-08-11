@@ -389,6 +389,17 @@ export default function Workspace() {
     setIsRightDrawerOpen(true);
   }, [setSelectedNode]);
 
+  // 🛡️ STABILIZER: Safely handles touch drop events on mobile to prevent DOM unmount crashes
+  const onNodeDragStop = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined' && window.getSelection) {
+        window.getSelection().removeAllRanges();
+      }
+    } catch (e) {
+      console.warn("Touch drop stabilization catch:", e);
+    }
+  }, []);
+
   const handleExportKiCad = () => {
     if (!nodes || nodes.length === 0) {
       alert("Canvas is empty! Generate or manually wire a circuit first.");
@@ -1104,37 +1115,38 @@ export default function Workspace() {
           )}
 
           <FlowErrorBoundary>
-  <ReactFlow
-    nodes={nodes}
-    edges={styledEdges}
-    onNodesChange={onNodesChange}
-    onEdgesChange={onEdgesChange}
-    onConnect={onConnect}
-    onEdgeClick={handleEdgeClick}
-    onNodeClick={handleNodeClick}
-    nodeTypes={nodeTypes}
-    colorMode="dark"
-    fitView
-    panOnScroll={true}
-    zoomOnPinch={true}
-    panOnDrag={true}
-    preventScrolling={false}
-    nodesDraggable={true} // 👈 Keep it TRUE for mobile and desktop!
-    nodesConnectable={true}
-    elementsSelectable={true}
-    selectNodesOnDrag={false}
-    elevateNodesOnSelect={true}
-    onlyRenderVisibleElements={true} // 👈 CRITICAL: Prevents heavy mobile DOM re-renders during fast drags
-    fitViewOptions={{ padding: 0.2 }}
-    isValidConnection={() => true}
-    connectionLineType="step"
-    connectionRadius={35}
-    connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
-  >
-    <Background color="#27272a" gap={20} size={1} />
-    <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
-  </ReactFlow>
-</FlowErrorBoundary>
+            <ReactFlow
+              nodes={nodes}
+              edges={styledEdges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onEdgeClick={handleEdgeClick}
+              onNodeClick={handleNodeClick}
+              onNodeDragStop={onNodeDragStop} // 👈 STABILIZER: Intercepts touch release to prevent drop crashes
+              nodeTypes={nodeTypes}
+              colorMode="dark"
+              fitView
+              panOnScroll={true}
+              zoomOnPinch={true}
+              panOnDrag={true}
+              preventScrolling={false}
+              nodesDraggable={true}
+              nodesConnectable={true}
+              elementsSelectable={true}
+              selectNodesOnDrag={false}
+              elevateNodesOnSelect={true}
+              onlyRenderVisibleElements={true}
+              fitViewOptions={{ padding: 0.2 }}
+              isValidConnection={() => true}
+              connectionLineType="step"
+              connectionRadius={35}
+              connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
+            >
+              <Background color="#27272a" gap={20} size={1} />
+              <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
+            </ReactFlow>
+          </FlowErrorBoundary>
         </main>
 
         {/* RIGHT DRC & INSPECTOR DRAWER */}
