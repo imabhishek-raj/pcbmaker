@@ -1,60 +1,46 @@
 // src/components/ICNode.jsx
-import React, { memo } from 'react';
+import React from 'react';
 import { Handle, Position } from '@xyflow/react';
 
-const ICNode = memo(({ id, data, selected }) => {
-  const pins = data?.pins || [];
-
+export default function ICNode({ data }) {
   return (
-    <div style={{
-      padding: '10px 14px',
-      borderRadius: '8px',
-      backgroundColor: '#18181b',
-      border: selected ? '2px solid #00E5FF' : '1px solid #27272a',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-      minWidth: '170px',
-      fontFamily: 'monospace',
-      color: '#f4f4f5',
-      position: 'relative',
-      touchAction: 'none',           // Prevents mobile scroll/drag gesture collisions
-      userSelect: 'none',            // Prevents text selection highlighting during drags
-      WebkitUserSelect: 'none',      // Safari/Mobile browser support for selection lock
-      WebkitTouchCallout: 'none'     // Prevents mobile callout menus on long press/fast drag
-    }}>
-      {/* Component Title */}
-      <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#22d3ee', marginBottom: '8px', borderBottom: '1px solid #27272a', paddingBottom: '4px' }}>
-        {data?.label || id}
+    <div 
+      style={{ 
+        background: '#18181b', 
+        border: '1px solid #27272a', 
+        borderRadius: '8px', 
+        padding: '12px', 
+        color: '#f4f4f5',
+        minWidth: '160px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+      }}
+    >
+      {/* Node Header / Title (Safe for dragging) */}
+      <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#00E5FF', marginBottom: '8px' }}>
+        {data.label}
       </div>
 
-      {/* Pin List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {pins.map((pin) => {
-          const pinId = String(typeof pin === 'string' ? pin : (pin.id || pin.label));
-          const pinLabel = String(typeof pin === 'string' ? pin : (pin.label || pin.id));
-
+      {/* Interactive content container MUST have 'nodrag' so touch events don't crash */}
+      <div className="nodrag" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {data.pins?.map((pin, index) => {
+          const pinId = typeof pin === 'object' ? (pin.id || pin.label) : pin;
           return (
-            <div key={pinId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', height: '18px' }}>
+            <div key={index} style={{ fontSize: '10px', color: '#a1a1aa', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Pin: {pinId}</span>
+              <span style={{ color: '#10b981' }}>●</span>
               
-              {/* Left Terminal Handle */}
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={`${pinId}_in`}
-                isConnectableStart={true}
-                isConnectableEnd={true}
-                style={{ left: '-19px', width: '8px', height: '8px', backgroundColor: '#00E5FF', borderRadius: '50%', border: '2px solid #09090b' }}
+              {/* Handles */}
+              <Handle 
+                type="target" 
+                position={Position.Left} 
+                id={`${pinId}_in`} 
+                style={{ background: '#00E5FF', borderRadius: '4px' }} 
               />
-
-              <span style={{ fontSize: '10px', color: '#a1a1aa', margin: '0 auto' }}>{pinLabel}</span>
-
-              {/* Right Terminal Handle */}
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={`${pinId}_out`}
-                isConnectableStart={true}
-                isConnectableEnd={true}
-                style={{ right: '-19px', width: '8px', height: '8px', backgroundColor: '#00E5FF', borderRadius: '50%', border: '2px solid #09090b' }}
+              <Handle 
+                type="source" 
+                position={Position.Right} 
+                id={`${pinId}_out`} 
+                style={{ background: '#00E5FF', borderRadius: '4px' }} 
               />
             </div>
           );
@@ -62,6 +48,4 @@ const ICNode = memo(({ id, data, selected }) => {
       </div>
     </div>
   );
-});
-
-export default ICNode;
+}
