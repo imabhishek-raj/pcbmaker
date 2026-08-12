@@ -7,14 +7,16 @@ export async function generateCircuitFromPrompt(userPrompt, currentCanvasState =
     currentCanvasState = null;
   }
 
-  if (apiKey) {
-    try {
-      // 1. Build context-aware prompt payload
-      const existingNodes = currentCanvasState?.nodes || [];
-      const existingEdges = currentCanvasState?.edges || [];
+  if (!apiKey) {
+    throw new Error("Missing DeepSeek API Key. Please configure your API key to use live AI synthesis.");
+  }
 
-      const systemPrompt = `
-You are an expert EDA Hardware Copilot for PCB Maker.
+  try {
+    const existingNodes = currentCanvasState?.nodes || [];
+    const existingEdges = currentCanvasState?.edges || [];
+
+    const systemPrompt = `
+You are an expert EDA Hardware Copilot for PCB Maker. Your job is to design accurate, production-grade electronic schematics based on user prompts.
 
 ${existingNodes.length > 0 ? `
 CURRENT CANVAS NETLIST STATE:
@@ -27,140 +29,64 @@ INSTRUCTIONS FOR INCREMENTAL EDITS:
 3. CLOSE CIRCUIT LOOPS: Ensure every new component's pins are connected via valid edges. Never leave orphan/unrouted power or signal pins.
 ` : `
 INSTRUCTIONS FOR NEW CIRCUIT:
-Generate a complete, fully connected schematic netlist with 0 DRC errors. Ensure power (VCC/BAT) and ground return (GND) loops are fully closed.
+Generate a complete, fully connected schematic netlist with 0 DRC errors. Ensure power (VCC/BAT) and ground return (GND) loops are fully closed. Always include specific MCU nodes, regulators, and decoupling passives when requested.
 `}
 
 RESPONSE RULES:
-Return ONLY a valid JSON object. No raw text or markdown outside JSON.
+Return ONLY a valid JSON object. No markdown formatting, no conversational text, no reasoning text outside the JSON.
 JSON Structure:
 {
   "explanation": "A short, 1-sentence summary of what was generated or added.",
-  "nodes": [ ...all existing + new node objects... ],
-  "edges": [ ...all existing + new edge objects... ]
+  "nodes": [ ...all existing + new node objects with id, label, position {x, y}, and pins array... ],
+  "edges": [ ...all existing + new edge objects with id, source, sourceHandle, target, targetHandle, label... ]
 }
 `;
 
-      const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "deepseek-reasoner",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ],
-          temperature: 0.2
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        let rawText = data.choices[0]?.message?.content || "";
-        
-        // Clean out markdown code blocks and reasoning tags
-        rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-        
-        // Extract JSON if model returned wrapped text
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        const parsedData = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
-
-        return parsedData;
-      }
-    } catch (e) {
-      console.warn("Direct API call failed, switching to local circuit generator", e);
-    }
-  }
-
-  // Fallback Simulation Engine (Used when no API Key is active)
-  await new Promise((resolve) => setTimeout(resolve, 800));
-
-  // If adding to existing local state, append an extra LED demo
-  if (currentCanvasState && currentCanvasState.nodes?.length > 0) {
-    const existing = JSON.parse(JSON.stringify(currentCanvasState));
-    const newId = `d${existing.nodes.length + 1}`;
-    
-    existing.nodes.push({
-      id: newId,
-      label: `D${existing.nodes.length}: Status LED`,
-      position: { x: 300, y: 450 },
-      pins: [
-        { id: "anode", label: "1: ANODE", type: "power", pos: "left" },
-        { id: "cathode", label: "2: CATHODE", type: "ground", pos: "right" }
-      ]
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat", // 👈 Use 'deepseek-chat' (V3) for structured JSON tasks instead of deepseek-reasoner to avoid think-tag parsing overhead
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        temperature: 0.1, // Lower temperature forces rigid adherence to schema
+        response_format: { type: "json_object" } // 👈 Forces DeepSeek to guarantee a valid JSON response
+      })
     });
 
-    return {
-      explanation: `Appended new status indicator node (${newId}) to canvas.`,
-      nodes: existing.nodes,
-      edges: existing.edges
-    };
-  }
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`DeepSeek API error (${response.status}): ${errText}`);
+    }
 
-  // Default initial circuit fallback
-  return {
-    explanation: `Generated schematic structure for: "${userPrompt}"`,
-    nodes: [
-      {
-        id: "u1",
-        label: "U1: ESP32-S3 Core",
-        position: { x: 100, y: 120 },
-        pins: [
-          { id: "vcc", label: "1: VCC (3.3V)", type: "power", pos: "left" },
-          { id: "gnd", label: "2: GND", type: "ground", pos: "right" },
-          { id: "tx", label: "3: TXD0", type: "signal", pos: "right" },
-          { id: "rx", label: "4: RXD0", type: "signal", pos: "left" }
-        ]
-      },
-      {
-        id: "u2",
-        label: "U2: CP2102 Serial Bridge",
-        position: { x: 480, y: 120 },
-        pins: [
-          { id: "vcc", label: "1: VDD", type: "power", pos: "left" },
-          { id: "gnd", label: "2: GND", type: "ground", pos: "right" },
-          { id: "tx", label: "3: TXD", type: "signal", pos: "left" },
-          { id: "rx", label: "4: RXD", type: "signal", pos: "right" }
-        ]
-      },
-      {
-        id: "u3",
-        label: "U3: AMS1117-3.3 LDO",
-        position: { x: 300, y: 350 },
-        pins: [
-          { id: "vin", label: "1: VIN (5V)", type: "power", pos: "left" },
-          { id: "gnd", label: "2: GND", type: "ground", pos: "right" },
-          { id: "vout", label: "3: VOUT (3.3V)", type: "power", pos: "right" }
-        ]
-      }
-    ],
-    edges: [
-      {
-        id: "e1",
-        source: "u2",
-        sourceHandle: "tx",
-        target: "u1",
-        targetHandle: "rx",
-        label: "UART_RX"
-      },
-      {
-        id: "e2",
-        source: "u1",
-        sourceHandle: "tx",
-        target: "u2",
-        targetHandle: "rx",
-        label: "UART_TX"
-      },
-      {
-        id: "e3",
-        source: "u3",
-        sourceHandle: "vout",
-        target: "u1",
-        targetHandle: "vcc",
-        label: "3V3_POWER"
-      }
-    ]
-  };
+    const data = await response.json();
+    let rawText = data.choices[0]?.message?.content || "";
+    
+    // Clean out any residual markdown just in case
+    rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+    
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Model failed to output a parsable JSON object structure.");
+    }
+
+    const parsedData = JSON.parse(jsonMatch[0]);
+
+    // Validate structure integrity
+    if (!parsedData.nodes || !Array.isArray(parsedData.nodes)) {
+      throw new Error("Invalid netlist format: 'nodes' array missing from AI response.");
+    }
+
+    return parsedData;
+
+  } catch (e) {
+    console.error("DeepSeek API Synthesis Failed:", e);
+    // Throw error upward so UI displays the real issue rather than silently dropping a generic fallback box
+    throw e;
+  }
 }
