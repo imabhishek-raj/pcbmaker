@@ -312,10 +312,11 @@ export default function Workspace() {
     clearChatHistory();
   };
 
+// ⚡ PERFORMANCE FIX: Only run DRC when components are added/removed or edges change, NOT on position dragging
   useEffect(() => {
     const warnings = runDRCCheck(nodes, edges);
     setDrcErrors(warnings);
-  }, [nodes, edges, setDrcErrors]);
+  }, [edges, nodes.length, setDrcErrors]);
 
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
