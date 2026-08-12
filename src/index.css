@@ -65,3 +65,12 @@ html, body, #root {
   stroke-width: 3.5px !important;
   cursor: pointer;
 }
+/* ===================================================
+   MOBILE TOUCH STABILIZER FOR REACT FLOW NODES
+   =================================================== */
+.react-flow__node {
+  touch-action: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
