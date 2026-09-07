@@ -133,6 +133,38 @@ const cleanNodePins = (compName, rawPins) => {
   return libPins.map(p => ({ id: p.id || p, label: p.label || p }));
 };
 
+const optimizePromptSpec = (rawQuery, previousHistory = []) => {
+  const baseQuery = rawQuery.split('— Specs:')[0].trim();
+  const q = baseQuery.toLowerCase();
+
+  let contextContextStr = '';
+  if (previousHistory.length > 0) {
+    const cleanHistory = previousHistory
+      .filter(m => !m.text.includes('✨ Refined Specs:'))
+      .slice(-4)
+      .map(m => `${m.sender}: ${m.text.replace(/\[Active Session Context:[\s\S]*?\]/g, '').trim()}`)
+      .join(' | ');
+    if (cleanHistory) {
+      contextContextStr = ` [Active Session Context: ${cleanHistory}]`;
+    }
+  }
+
+  if (q.includes('4 bit') || q.includes('4-bit') || q.includes('8 bit') || q.includes('8-bit') || q.includes('atmega') || q.includes('avr') || q.includes('cpu')) {
+    return `${baseQuery}${contextContextStr} — Specs: Include ATmega328P MCU (MCU1), AMS1117-3.3V Regulator (U1), 16MHz Crystal Oscillator (XTAL1), 10k Reset Resistor (R1), Reset Tactile Switch (SW1), and 100nF Cap (C1). Connect VCC, GND, RESET, XTAL1, and XTAL2.`;
+  }
+  if (q.includes('32 bit') || q.includes('32-bit') || q.includes('stm32') || q.includes('arm')) {
+    return `${baseQuery}${contextContextStr} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
+  }
+  if (q.includes('flight controller') || q.includes('esp') || q.includes('microcontroller') || q.includes('mcu')) {
+    return `${baseQuery}${contextContextStr} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
+  }
+  if (q.includes('bms') || q.includes('battery protection') || q.includes('protection circuit')) {
+    return `${baseQuery}${contextContextStr} — Specs: Include 3.7V Cell (BAT1), DW01A Protection IC (IC1), AO8810 Dual N-Channel MOSFET (MOS1), 100nF decoupling capacitor (C1), and 1kΩ CS current resistor (R1). Connect VCC, GND, OD, and OC control nets.`;
+  }
+
+  return `${baseQuery}${contextContextStr} — Specs: Standard EDA netlist layout with decoupling, verified pin routing, and continuous power/GND return loop.`;
+};
+
 const extractJsonFromOutput = (rawResult) => {
   if (typeof rawResult === 'object' && rawResult !== null) return rawResult;
   let text = String(rawResult || '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -262,7 +294,6 @@ export default function Workspace() {
 
   const [inputMsg, setInputMsg] = useState('');
 
-  // Smart Circuit Health Score Calculation
   const schematicHealthScore = nodes.length === 0 ? 100 : Math.max(0, 100 - (drcErrors.length * 20));
 
   useEffect(() => {
@@ -380,6 +411,13 @@ export default function Workspace() {
     setSelectedNode(node);
     setIsRightDrawerOpen(true);
   }, [setSelectedNode]);
+
+  const handleDeleteSelectedEdge = () => {
+    if (!selectedEdge) return;
+    setEdges((eds) => eds.filter(e => e.id !== selectedEdge.id));
+    setSelectedEdge(null);
+    addChatMessage({ sender: 'AI Copilot', text: `Removed selected wire trace connection.` });
+  };
 
   const handleSaveBoardSnapshot = () => {
     const saveData = {
@@ -527,7 +565,7 @@ export default function Workspace() {
       setIsLeftCopilotOpen(true);
     }
 
-    const enhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(queryText) : queryText;
+    const enhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(optimizePromptSpec(queryText, chatMessages)) : queryText;
 
     if (!forceEnhanced && enhancedPrompt !== queryText) {
       setPendingPromptObj({ raw: queryText, enhanced: enhancedPrompt });
@@ -1096,6 +1134,84 @@ export default function Workspace() {
                     {err.message}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ borderTop: '1px solid #27272a', paddingTop: '16px' }}>
+            <div style={{ fontWeight: 'bold', fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '12px' }}>
+              Inspector Panel
+            </div>
+
+            {selectedNode && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Component</span>
+                  <div style={{ color: '#22d3ee', fontWeight: 'bold', fontSize: '12px', marginTop: '2px' }}>{selectedNode.id.toUpperCase()}</div>
+                </div>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Part Name</span>
+                  <div style={{ color: '#f4f4f5', marginTop: '2px' }}>{selectedNode.data?.label}</div>
+                </div>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Active Pin Terminals</span>
+                  <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {selectedNode.data?.pins?.map((pin, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#a1a1aa', borderBottom: '1px solid #27272a', paddingBottom: '3px' }}>
+                        <span>{pin.label || pin.id}</span>
+                        <span style={{ color: '#34d399' }}>● active</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {selectedEdge && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Net Trace</span>
+                  <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '11px', marginTop: '4px' }}>
+                    {selectedEdge.label || selectedEdge.id}
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleDeleteSelectedEdge}
+                  style={{
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid #ef4444',
+                    color: '#f87171',
+                    padding: '8px',
+                    borderRadius: '6px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                    marginTop: '4px'
+                  }}
+                >
+                  🗑️ Delete Wire Trace
+                </button>
+
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Net Origin (From)</span>
+                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
+                    {selectedEdge.source.toUpperCase()} → Pin {selectedEdge.sourceHandle?.replace(/_(in|out)$/, '')}
+                  </div>
+                </div>
+
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Net Destination (To)</span>
+                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
+                    {selectedEdge.target.toUpperCase()} → Pin {selectedEdge.targetHandle?.replace(/_(in|out)$/, '')}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!selectedNode && !selectedEdge && (
+              <div style={{ color: '#71717a', fontStyle: 'italic', textAlign: 'center', padding: '20px 0' }}>
+                Click any component card OR wire trace on the canvas to inspect details.
               </div>
             )}
           </div>
