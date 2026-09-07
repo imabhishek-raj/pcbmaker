@@ -133,38 +133,6 @@ const cleanNodePins = (compName, rawPins) => {
   return libPins.map(p => ({ id: p.id || p, label: p.label || p }));
 };
 
-const optimizePromptSpec = (rawQuery, previousHistory = []) => {
-  const baseQuery = rawQuery.split('— Specs:')[0].trim();
-  const q = baseQuery.toLowerCase();
-
-  let contextContextStr = '';
-  if (previousHistory.length > 0) {
-    const cleanHistory = previousHistory
-      .filter(m => !m.text.includes('✨ Refined Specs:'))
-      .slice(-4)
-      .map(m => `${m.sender}: ${m.text.replace(/\[Active Session Context:[\s\S]*?\]/g, '').trim()}`)
-      .join(' | ');
-    if (cleanHistory) {
-      contextContextStr = ` [Active Session Context: ${cleanHistory}]`;
-    }
-  }
-
-  if (q.includes('4 bit') || q.includes('4-bit') || q.includes('8 bit') || q.includes('8-bit') || q.includes('atmega') || q.includes('avr') || q.includes('cpu')) {
-    return `${baseQuery}${contextContextStr} — Specs: Include ATmega328P MCU (MCU1), AMS1117-3.3V Regulator (U1), 16MHz Crystal Oscillator (XTAL1), 10k Reset Resistor (R1), Reset Tactile Switch (SW1), and 100nF Cap (C1). Connect VCC, GND, RESET, XTAL1, and XTAL2.`;
-  }
-  if (q.includes('32 bit') || q.includes('32-bit') || q.includes('stm32') || q.includes('arm')) {
-    return `${baseQuery}${contextContextStr} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
-  }
-  if (q.includes('flight controller') || q.includes('esp 32 mini') || q.includes('itself') || q.includes('bare') || (q.includes('esp') && !q.includes('bms') && !q.includes('led'))) {
-    return `${baseQuery}${contextContextStr} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
-  }
-  if (q.includes('bms') || q.includes('battery protection') || q.includes('protection circuit')) {
-    return `${baseQuery}${contextContextStr} — Specs: Include 3.7V Cell (BAT1), DW01A Protection IC (IC1), AO8810 Dual N-Channel MOSFET (MOS1), 100nF decoupling capacitor (C1), and 1kΩ CS current resistor (R1). Connect VCC, GND, OD, and OC control nets.`;
-  }
-
-  return `${baseQuery}${contextContextStr} — Specs: Standard EDA netlist layout with decoupling, verified pin routing, and continuous power/GND return loop.`;
-};
-
 const extractJsonFromOutput = (rawResult) => {
   if (typeof rawResult === 'object' && rawResult !== null) return rawResult;
   let text = String(rawResult || '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -255,8 +223,16 @@ const autoPatchFloatingPins = (currentNodes, currentEdges) => {
 };
 
 export default function Workspace() {
-  const [nodes, setNodes] = useState([]);
-  const [edges, setEdges] = useState([]);
+  const [nodes, setNodes] = useState(() => {
+    const saved = localStorage.getItem('pcb_canvas_nodes');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  const [edges, setEdges] = useState(() => {
+    const saved = localStorage.getItem('pcb_canvas_edges');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
@@ -267,6 +243,9 @@ export default function Workspace() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [heroPromptInput, setHeroPromptInput] = useState('');
   
+  const [pendingPromptObj, setPendingPromptObj] = useState(null);
+  const [boardNotes, setBoardNotes] = useState(() => localStorage.getItem('pcb_board_notes') || '');
+
   const [searchQueryInput, setSearchQueryInput] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearchingFlywheel, setIsSearchingFlywheel] = useState(false);
@@ -282,6 +261,18 @@ export default function Workspace() {
   } = useBoardStore();
 
   const [inputMsg, setInputMsg] = useState('');
+
+  // Smart Circuit Health Score Calculation
+  const schematicHealthScore = nodes.length === 0 ? 100 : Math.max(0, 100 - (drcErrors.length * 20));
+
+  useEffect(() => {
+    localStorage.setItem('pcb_canvas_nodes', JSON.stringify(nodes));
+    localStorage.setItem('pcb_canvas_edges', JSON.stringify(edges));
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    localStorage.setItem('pcb_board_notes', boardNotes);
+  }, [boardNotes]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -307,6 +298,9 @@ export default function Workspace() {
     setSelectedEdge(null);
     clearChatHistory();
     setSearchResults([]);
+    setPendingPromptObj(null);
+    localStorage.removeItem('pcb_canvas_nodes');
+    localStorage.removeItem('pcb_canvas_edges');
   };
 
   useEffect(() => {
@@ -386,6 +380,26 @@ export default function Workspace() {
     setSelectedNode(node);
     setIsRightDrawerOpen(true);
   }, [setSelectedNode]);
+
+  const handleSaveBoardSnapshot = () => {
+    const saveData = {
+      timestamp: new Date().toISOString(),
+      notes: boardNotes,
+      nodes,
+      edges,
+      chatMessages
+    };
+    const blob = new Blob([JSON.stringify(saveData, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `pcbmaker_snapshot_${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    addChatMessage({ sender: 'AI Copilot', text: '💾 Board snapshot and notes saved successfully!' });
+  };
 
   const handleExportKiCad = () => {
     if (!nodes || nodes.length === 0) {
@@ -476,7 +490,6 @@ export default function Workspace() {
     if (isMobile) setIsMobileMenuOpen(false);
   };
 
-  // 🚀 FIXED SEARCH ENDPOINT POINTING TO NGINX PROXY ON EC2
   const handleFlywheelSearch = async (queryText) => {
     const q = queryText || searchQueryInput;
     if (!q.trim() || isSearchingFlywheel) return;
@@ -507,21 +520,30 @@ export default function Workspace() {
     }
   };
 
-  const executeGenerationQuery = async (queryText) => {
+  const executeGenerationQuery = async (queryText, forceEnhanced = false) => {
     if (!queryText.trim() || isLoading) return;
 
     if (isMobile) {
       setIsLeftCopilotOpen(true);
     }
 
+    const enhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(queryText) : queryText;
+
+    if (!forceEnhanced && enhancedPrompt !== queryText) {
+      setPendingPromptObj({ raw: queryText, enhanced: enhancedPrompt });
+      addChatMessage({ 
+        sender: 'AI Copilot', 
+        text: `💡 Suggested Hardware Spec Enhancement:\n"${enhancedPrompt}"\nWould you like to build using this enhanced RAG specification or your original query words?` 
+      });
+      return;
+    }
+
+    setPendingPromptObj(null);
     addChatMessage({ sender: 'User', text: queryText });
     setIsLoading(true);
 
     try {
-      const specRefinedPrompt = optimizePromptSpec(queryText, chatMessages);
-      const ragEnhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(specRefinedPrompt) : specRefinedPrompt;
-
-      const response = await generatePcbFromAmplify(ragEnhancedPrompt);
+      const response = await generatePcbFromAmplify(enhancedPrompt);
       const result = extractJsonFromOutput(response);
 
       let cleanExplanation = result?.explanation || "Circuit netlist updated on canvas.";
@@ -748,7 +770,6 @@ export default function Workspace() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100vw', backgroundColor: '#09090b', color: '#f4f4f5', overflow: 'hidden', fontFamily: 'sans-serif' }}>
       
-      {/* TOOLBOX FLOATING DRAWER OVERLAY */}
       {isPaletteOpen && (
         <div style={{
           position: 'fixed', top: '60px', right: isMobile ? '12px' : '80px', left: isMobile ? '12px' : 'auto', zIndex: 90,
@@ -763,21 +784,11 @@ export default function Workspace() {
         </div>
       )}
 
-      {/* COMPACT MOBILE-FIRST HEADER */}
       <header style={{ 
-        height: '52px', 
-        minHeight: '52px', 
-        borderBottom: '1px solid #27272a', 
-        backgroundColor: '#18181b', 
-        padding: '0 12px', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'space-between', 
-        zIndex: 50,
-        position: 'relative'
+        height: '52px', minHeight: '52px', borderBottom: '1px solid #27272a', 
+        backgroundColor: '#18181b', padding: '0 12px', display: 'flex', 
+        alignItems: 'center', justifyContent: 'space-between', zIndex: 50, position: 'relative'
       }}>
-        
-        {/* LOGO BRANDING */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontWeight: '800', fontSize: '18px', letterSpacing: '-0.4px', fontFamily: 'sans-serif' }}>
             <span style={{ color: '#FF6B00' }}>pcb</span>
@@ -785,9 +796,11 @@ export default function Workspace() {
             <span style={{ color: '#7171AA' }}>.</span>
             <span style={{ color: '#10B981' }}>in</span>
           </span>
+          <span style={{ fontSize: '10px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 6px', borderRadius: '10px', marginLeft: '10px' }}>
+            Health: {schematicHealthScore}%
+          </span>
         </div>
 
-        {/* DESKTOP TOOLBAR (HORIZONTAL) */}
         {!isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <button 
@@ -817,6 +830,10 @@ export default function Workspace() {
               🧩 Toolbox
             </button>
             
+            <button onClick={handleSaveBoardSnapshot} style={{ ...headerBtnStyle, backgroundColor: '#10b981', color: '#09090b', border: 'none', fontWeight: 'bold' }}>
+              💾 Save Snapshot
+            </button>
+
             <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
               KiCad (.kicad_sch)
             </button>
@@ -827,7 +844,6 @@ export default function Workspace() {
           </div>
         )}
 
-        {/* MOBILE CONTROLS */}
         {isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button 
@@ -843,6 +859,10 @@ export default function Workspace() {
               🔍 DRC ({drcErrors.length})
             </button>
 
+            <button onClick={handleSaveBoardSnapshot} style={{ ...headerBtnStyle, backgroundColor: '#10b981', color: '#09090b', border: 'none', padding: '0 8px' }}>
+              💾 Save
+            </button>
+
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               style={{ ...headerBtnStyle, backgroundColor: '#27272a', borderColor: '#00E5FF', color: '#00E5FF', padding: '0 10px', fontSize: '13px' }}
@@ -853,24 +873,13 @@ export default function Workspace() {
         )}
       </header>
 
-      {/* WORKSPACE AREA */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', height: 'calc(100dvh - 52px)' }}>
         
-        {/* LEFT COPILOT DRAWER */}
         <aside style={{ 
-          width: isMobile ? '100vw' : '320px', 
-          minWidth: isMobile ? '100vw' : '300px', 
-          maxWidth: isMobile ? '100vw' : '340px', 
-          borderRight: '1px solid #27272a', 
-          backgroundColor: '#18181b', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          zIndex: 40,
-          position: isMobile ? 'absolute' : 'relative',
-          top: 0, bottom: 0, left: 0,
-          height: '100%',
-          transform: isLeftCopilotOpen ? 'translateX(0)' : 'translateX(-100%)',
-          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+          width: isMobile ? '100vw' : '320px', minWidth: isMobile ? '100vw' : '300px', maxWidth: isMobile ? '100vw' : '340px', 
+          borderRight: '1px solid #27272a', backgroundColor: '#18181b', display: 'flex', flexDirection: 'column', zIndex: 40,
+          position: isMobile ? 'absolute' : 'relative', top: 0, bottom: 0, left: 0, height: '100%',
+          transform: isLeftCopilotOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         }}>
 
           <div style={{ padding: '12px 14px', borderBottom: '1px solid #27272a', fontWeight: 'bold', fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -880,18 +889,10 @@ export default function Workspace() {
             </span>
             
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <button 
-                onClick={handleFullReset}
-                style={{ backgroundColor: '#27272a', color: '#f43f5e', border: '1px solid #3f3f46', fontSize: '10px', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-                title="Clear chat and reset canvas"
-              >
+              <button onClick={handleFullReset} style={{ backgroundColor: '#27272a', color: '#f43f5e', border: '1px solid #3f3f46', fontSize: '10px', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
                 🗑️ Clear
               </button>
-              <button 
-                onClick={() => setIsLeftCopilotOpen(false)}
-                style={{ backgroundColor: '#27272a', border: '1px solid #3f3f46', color: '#f4f4f5', cursor: 'pointer', fontSize: '12px', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                title="Close drawer"
-              >
+              <button onClick={() => setIsLeftCopilotOpen(false)} style={{ backgroundColor: '#27272a', border: '1px solid #3f3f46', color: '#f4f4f5', cursor: 'pointer', fontSize: '12px', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 ✕
               </button>
             </div>
@@ -904,6 +905,22 @@ export default function Workspace() {
                 {m.text}
               </div>
             ))}
+
+            {pendingPromptObj && (
+              <div style={{ backgroundColor: 'rgba(0, 229, 255, 0.08)', border: '1px solid #00E5FF', borderRadius: '6px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '10px', color: '#00E5FF', fontWeight: 'bold' }}>💡 Spec Enhancement Suggestion:</div>
+                <div style={{ fontSize: '10px', color: '#f4f4f5', fontStyle: 'italic' }}>"{pendingPromptObj.enhanced}"</div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button onClick={() => executeGenerationQuery(pendingPromptObj.enhanced, true)} style={{ flex: 1, backgroundColor: '#00E5FF', color: '#09090b', border: 'none', padding: '6px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '10px' }}>
+                    ⚡ Build Enhanced
+                  </button>
+                  <button onClick={() => executeGenerationQuery(pendingPromptObj.raw, true)} style={{ flex: 1, backgroundColor: '#27272a', color: '#fff', border: '1px solid #3f3f46', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px' }}>
+                    Use Original
+                  </button>
+                </div>
+              </div>
+            )}
+
             {isLoading && (
               <div style={{ padding: '10px', borderRadius: '6px', backgroundColor: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#f59e0b', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ animation: 'spin 1s linear infinite' }}>⚙️</span>
@@ -912,54 +929,40 @@ export default function Workspace() {
             )}
           </div>
 
-          {/* CHAT INPUT AREA FIXED TO BOTTOM */}
-          <div style={{ padding: '12px', borderTop: '1px solid #27272a', display: 'flex', gap: '8px', backgroundColor: '#18181b', paddingBottom: isMobile ? '24px' : '12px' }}>
-            <input 
-              value={inputMsg}
-              disabled={isLoading}
-              onChange={(e) => setInputMsg(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="e.g., design a 5w usb speaker using pam8403..."
-              style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '11px', padding: '10px', borderRadius: '6px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', width: '100%' }}
+          <div style={{ padding: '12px', borderTop: '1px solid #27272a', display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: '#18181b' }}>
+            <textarea
+              value={boardNotes}
+              onChange={(e) => setBoardNotes(e.target.value)}
+              placeholder="Jot project notes here (persists locally)..."
+              rows={2}
+              style={{ backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '10px', padding: '6px', borderRadius: '6px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', resize: 'none' }}
             />
-            <button 
-              onClick={handleSendMessage}
-              disabled={isLoading}
-              style={{ backgroundColor: '#0891b2', fontSize: '11px', padding: '0 14px', borderRadius: '6px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '600' }}
-            >
-              Send
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input 
+                value={inputMsg}
+                disabled={isLoading}
+                onChange={(e) => setInputMsg(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                placeholder="e.g., design a 5w usb speaker..."
+                style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '11px', padding: '10px', borderRadius: '6px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none' }}
+              />
+              <button onClick={handleSendMessage} disabled={isLoading} style={{ backgroundColor: '#0891b2', fontSize: '11px', padding: '0 14px', borderRadius: '6px', color: '#ffffff', border: 'none', cursor: 'pointer', fontWeight: '600' }}>
+                Send
+              </button>
+            </div>
           </div>
         </aside>
 
-        {/* CENTER REACTFLOW CANVAS */}
-        <main 
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-          style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative', touchAction: 'none' }}
-        >
-          {/* FLOATING ACTION COPILOT TRIGGER */}
+        <main onDragOver={onDragOver} onDrop={onDrop} style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative', touchAction: 'none' }}>
           {!isLeftCopilotOpen && (
             <button
               onClick={() => setIsLeftCopilotOpen(true)}
               style={{
-                position: 'absolute',
-                bottom: '24px',
-                right: '24px',
-                zIndex: 35,
-                backgroundColor: '#18181b',
-                border: '1px solid #00E5FF',
-                color: '#ffffff',
-                fontSize: '12px',
-                fontWeight: '700',
-                padding: '12px 20px',
-                borderRadius: '30px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 8px 24px rgba(0, 229, 255, 0.25)',
-                backdropFilter: 'blur(8px)'
+                position: 'absolute', bottom: '24px', right: '24px', zIndex: 35,
+                backgroundColor: '#18181b', border: '1px solid #00E5FF', color: '#ffffff',
+                fontSize: '12px', fontWeight: '700', padding: '12px 20px', borderRadius: '30px',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+                boxShadow: '0 8px 24px rgba(0, 229, 255, 0.25)', backdropFilter: 'blur(8px)'
               }}
             >
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', boxShadow: '0 0 8px #10b981' }}></span>
@@ -967,122 +970,34 @@ export default function Workspace() {
             </button>
           )}
 
-          {/* HERO EMPTY-STATE OVERLAY */}
           {nodes.length === 0 && (
-            <div style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 10,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '20px',
-              textAlign: 'center',
-              pointerEvents: 'none'
-            }}>
-              <div style={{
-                pointerEvents: 'auto',
-                maxWidth: '540px',
-                width: '100%',
-                backgroundColor: 'rgba(24, 24, 27, 0.85)',
-                backdropFilter: 'blur(16px)',
-                border: '1px solid rgba(39, 39, 42, 0.8)',
-                borderRadius: '20px',
-                padding: isMobile ? '24px 16px' : '36px 28px',
-                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '18px'
-              }}>
-                <div style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  backgroundColor: 'rgba(0, 229, 255, 0.08)',
-                  border: '1px solid rgba(0, 229, 255, 0.3)',
-                  color: '#00E5FF',
-                  fontSize: '10px',
-                  fontWeight: '700',
-                  padding: '5px 12px',
-                  borderRadius: '20px',
-                  letterSpacing: '0.6px',
-                  textTransform: 'uppercase'
-                }}>
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', textAlign: 'center', pointerEvents: 'none' }}>
+              <div style={{ pointerEvents: 'auto', maxWidth: '540px', width: '100%', backgroundColor: 'rgba(24, 24, 27, 0.85)', backdropFilter: 'blur(16px)', border: '1px solid rgba(39, 39, 42, 0.8)', borderRadius: '20px', padding: isMobile ? '24px 16px' : '36px 28px', boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px' }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: 'rgba(0, 229, 255, 0.08)', border: '1px solid rgba(0, 229, 255, 0.3)', color: '#00E5FF', fontSize: '10px', fontWeight: '700', padding: '5px 12px', borderRadius: '20px', letterSpacing: '0.6px', textTransform: 'uppercase' }}>
                   <span>India's 1st Autonomous AI EDA Engine</span>
                 </div>
 
-                <h1 style={{
-                  fontSize: isMobile ? '22px' : '28px',
-                  fontWeight: '800',
-                  margin: 0,
-                  color: '#ffffff',
-                  letterSpacing: '-0.5px',
-                  lineHeight: '1.2'
-                }}>
+                <h1 style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: '800', margin: 0, color: '#ffffff', letterSpacing: '-0.5px', lineHeight: '1.2' }}>
                   Dream It. Design It. Deploy It.
                 </h1>
 
-                <div style={{
-                  minHeight: '28px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: isMobile ? '11px' : '13px',
-                  lineHeight: '1.4'
-                }}>
+                <div style={{ minHeight: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '11px' : '13px', lineHeight: '1.4' }}>
                   <TypewriterText texts={HERO_SLOGANS} />
                 </div>
 
-                {/* GENERATION PROMPT FORM */}
-                <form 
-                  onSubmit={handleHeroSubmit} 
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    gap: '8px',
-                    marginTop: '8px'
-                  }}
-                >
+                <form onSubmit={handleHeroSubmit} style={{ width: '100%', display: 'flex', gap: '8px', marginTop: '8px' }}>
                   <input
                     value={heroPromptInput}
                     disabled={isLoading}
                     onChange={(e) => setHeroPromptInput(e.target.value)}
                     placeholder="Type to build e.g. 5W USB Speaker, ESP32 Flight Controller..."
-                    style={{
-                      flex: 1,
-                      backgroundColor: '#09090b',
-                      border: '1px solid #27272a',
-                      fontSize: '12px',
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      color: '#f4f4f5',
-                      fontFamily: 'monospace',
-                      outline: 'none',
-                      boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)'
-                    }}
+                    style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '12px', padding: '12px 14px', borderRadius: '8px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)' }}
                   />
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    style={{
-                      backgroundColor: '#00E5FF',
-                      color: '#09090b',
-                      fontWeight: '700',
-                      fontSize: '12px',
-                      padding: '0 18px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
+                  <button type="submit" disabled={isLoading} style={{ backgroundColor: '#00E5FF', color: '#09090b', fontWeight: '700', fontSize: '12px', padding: '0 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                     Build ⚡
                   </button>
                 </form>
 
-                {/* S3 FLYWHEEL VECTOR SEARCH WIDGET */}
                 <div style={{ width: '100%', borderTop: '1px solid #27272a', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input
@@ -1091,33 +1006,9 @@ export default function Workspace() {
                       onChange={(e) => setSearchQueryInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleFlywheelSearch()}
                       placeholder="Search S3 Flywheel schematics..."
-                      style={{
-                        flex: 1,
-                        backgroundColor: '#09090b',
-                        border: '1px solid #10b981',
-                        fontSize: '11px',
-                        padding: '10px 12px',
-                        borderRadius: '6px',
-                        color: '#34d399',
-                        fontFamily: 'monospace',
-                        outline: 'none'
-                      }}
+                      style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #10b981', fontSize: '11px', padding: '10px 12px', borderRadius: '6px', color: '#34d399', fontFamily: 'monospace', outline: 'none' }}
                     />
-                    <button
-                      type="button"
-                      onClick={() => handleFlywheelSearch()}
-                      disabled={isSearchingFlywheel}
-                      style={{
-                        backgroundColor: '#10b981',
-                        color: '#09090b',
-                        fontWeight: '700',
-                        fontSize: '11px',
-                        padding: '0 14px',
-                        borderRadius: '6px',
-                        border: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
+                    <button type="button" onClick={() => handleFlywheelSearch()} disabled={isSearchingFlywheel} style={{ backgroundColor: '#10b981', color: '#09090b', fontWeight: '700', fontSize: '11px', padding: '0 14px', borderRadius: '6px', border: 'none', cursor: 'pointer' }}>
                       {isSearchingFlywheel ? 'Searching...' : '🔍 Search Index'}
                     </button>
                   </div>
@@ -1133,7 +1024,6 @@ export default function Workspace() {
                     </div>
                   )}
                 </div>
-
               </div>
             </div>
           )}
@@ -1172,34 +1062,18 @@ export default function Workspace() {
           </FlowErrorBoundary>
         </main>
 
-        {/* RIGHT DRC & INSPECTOR DRAWER */}
-        <aside 
-          style={{ 
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: isMobile ? '100vw' : '320px', 
-            backgroundColor: '#18181b', 
-            borderLeft: '1px solid #27272a',
-            padding: '16px', 
-            fontFamily: 'monospace', 
-            fontSize: '11px', 
-            zIndex: 30, 
-            overflowY: 'auto',
-            transform: isRightDrawerOpen ? 'translateX(0)' : 'translateX(100%)',
-            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: isRightDrawerOpen ? '-4px 0 20px rgba(0,0,0,0.5)' : 'none'
-          }}
-        >
+        <aside style={{ 
+          position: 'absolute', top: 0, right: 0, bottom: 0,
+          width: isMobile ? '100vw' : '320px', backgroundColor: '#18181b', 
+          borderLeft: '1px solid #27272a', padding: '16px', fontFamily: 'monospace', 
+          fontSize: '11px', zIndex: 30, overflowY: 'auto',
+          transform: isRightDrawerOpen ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: isRightDrawerOpen ? '-4px 0 20px rgba(0,0,0,0.5)' : 'none'
+        }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '8px' }}>
             <span style={{ fontWeight: 'bold', color: '#a1a1aa', textTransform: 'uppercase' }}>DRC & Inspector</span>
-            <button 
-              onClick={() => setIsRightDrawerOpen(false)}
-              style={{ backgroundColor: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}
-            >
-              ✕
-            </button>
+            <button onClick={() => setIsRightDrawerOpen(false)} style={{ backgroundColor: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>✕</button>
           </div>
 
           <div style={{ marginBottom: '20px' }}>
@@ -1225,187 +1099,13 @@ export default function Workspace() {
               </div>
             )}
           </div>
-
-          <div style={{ borderTop: '1px solid #27272a', paddingTop: '16px' }}>
-            <div style={{ fontWeight: 'bold', fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase', marginBottom: '12px' }}>
-              Inspector Panel
-            </div>
-
-            {selectedNode && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Component</span>
-                  <div style={{ color: '#22d3ee', fontWeight: 'bold', fontSize: '12px', marginTop: '2px' }}>{selectedNode.id.toUpperCase()}</div>
-                </div>
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Part Name</span>
-                  <div style={{ color: '#f4f4f5', marginTop: '2px' }}>{selectedNode.data?.label}</div>
-                </div>
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Active Pin Terminals</span>
-                  <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {selectedNode.data?.pins?.map((pin, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#a1a1aa', borderBottom: '1px solid #27272a', paddingBottom: '3px' }}>
-                        <span>{pin.label || pin.id}</span>
-                        <span style={{ color: '#34d399' }}>● active</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {selectedEdge && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Net Trace</span>
-                  <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '11px', marginTop: '4px' }}>
-                    {selectedEdge.label || selectedEdge.id}
-                  </div>
-                </div>
-
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Net Origin (From)</span>
-                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
-                    {selectedEdge.source.toUpperCase()} → Pin {selectedEdge.sourceHandle?.replace(/_(in|out)$/, '')}
-                  </div>
-                </div>
-
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Net Destination (To)</span>
-                  <div style={{ color: '#f4f4f5', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
-                    {selectedEdge.target.toUpperCase()} → Pin {selectedEdge.targetHandle?.replace(/_(in|out)$/, '')}
-                  </div>
-                </div>
-
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Signal Rail Type</span>
-                  <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }}>
-                    {selectedEdge.style?.stroke === '#EF4444' ? '🔴 POWER RAIL (VCC/BAT+)' : 
-                     selectedEdge.style?.stroke === '#10B981' ? '🟢 GROUND RETURN (GND/VSS)' : 
-                     selectedEdge.style?.stroke === '#F59E0B' ? '🟠 COMMUNICATION BUS (I2C/UART)' : 
-                     '🔵 CONTROL / SIGNAL TRACE'}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {!selectedNode && !selectedEdge && (
-              <div style={{ color: '#71717a', fontStyle: 'italic', textAlign: 'center', padding: '20px 0' }}>
-                Click any component card OR wire trace on the canvas to inspect details.
-              </div>
-            )}
-          </div>
         </aside>
       </div>
 
-      {/* ABOUT MODAL */}
-      {isAboutModalOpen && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 100,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(6px)', padding: '16px'
-        }}>
-          <div style={{
-            backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px',
-            padding: '24px', width: '100%', maxWidth: '540px', maxHeight: '88vh',
-            display: 'flex', flexDirection: 'column', fontFamily: 'monospace', color: '#f4f4f5',
-            boxShadow: '0 20px 50px rgba(0,0,0,0.8)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontWeight: '800', fontSize: '18px' }}>
-                  <span style={{ color: '#FF6B00' }}>pcb</span>
-                  <span style={{ color: '#FFFFFF' }}>maker</span>
-                  <span style={{ color: '#7171AA' }}>.</span>
-                  <span style={{ color: '#10B981' }}>in</span>
-                </span>
-              </div>
-              <button onClick={() => setIsAboutModalOpen(false)} style={{ background: 'none', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }}>✕</button>
-            </div>
-
-            <div style={{ flex: 1, overflowY: 'auto', paddingRight: '6px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '8px', border: '1px solid #27272a' }}>
-                <span style={{ fontSize: '11px', color: '#FF6B00', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>
-                  🎯 Our Mission
-                </span>
-                <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#f4f4f5', margin: 0 }}>
-                  <strong>Democratizing Hardware Innovation:</strong> Building India's first fully autonomous, AI-driven EDA platform to bridge natural language prompts directly into production-grade electronic schematics with 0 DRC errors.
-                </p>
-              </div>
-
-              <div style={{ borderTop: '1px solid #27272a', paddingTop: '12px' }}>
-                <span style={{ fontSize: '11px', color: '#00E5FF', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '10px' }}>
-                  ⚡ Platform Capabilities & Services
-                </span>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
-                    <div style={{ color: '#38bdf8', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>🤖 AI Natural Language Copilot</div>
-                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Instant text-to-schematic synthesis for Microcontrollers, BMS protection circuits, IoT nodes, and custom hardware.</div>
-                  </div>
-
-                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
-                    <div style={{ color: '#10b981', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>🔍 Automated Design Rule Checking (DRC)</div>
-                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Real-time netlist validation checking power/GND loops, current-limiting resistors, and signal integrity.</div>
-                  </div>
-
-                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
-                    <div style={{ color: '#f59e0b', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>📂 KiCad EDA Native Export</div>
-                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Generates standard `.kicad_sch` schematics compatible with KiCad for immediate PCB routing & manufacturing.</div>
-                  </div>
-
-                  <div style={{ backgroundColor: '#09090b', padding: '10px', borderRadius: '6px', border: '1px solid #27272a' }}>
-                    <div style={{ color: '#a855f7', fontWeight: 'bold', fontSize: '11px', marginBottom: '2px' }}>🔄 Cloud Training Data Flywheel</div>
-                    <div style={{ color: '#a1a1aa', fontSize: '10px', lineHeight: '1.4' }}>Seamlessly streams verified 0-DRC circuit netlists directly to Amazon S3 for continuous AI model fine-tuning.</div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ borderTop: '1px solid #27272a', paddingTop: '12px', overflow: 'hidden' }}>
-                <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
-                  🤝 Ecosystem Compatibility & Integrations
-                </span>
-
-                <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', backgroundColor: '#09090b', padding: '8px', borderRadius: '6px', border: '1px solid #27272a' }}>
-                  <div style={{
-                    display: 'inline-block',
-                    animation: 'marquee 18s linear infinite',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    color: '#00E5FF',
-                    letterSpacing: '1px'
-                  }}>
-                    {partnerLogos.join(" ──► ")} ──► {partnerLogos.join(" ──► ")}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '6px', border: '1px solid #27272a', marginTop: '2px' }}>
-                <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Direct Inquiries & Technical Support</span>
-                <a href="mailto:support@pcbmaker.in" style={{ color: '#00E5FF', fontWeight: 'bold', textDecoration: 'none', fontSize: '13px' }}>
-                  ✉️ support@pcbmaker.in
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <style>{`
-        @keyframes marquee {
-          0% { transform: translateX(0%); }
-          100% { transform: translateX(-50%); }
-        }
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0; }
-        }
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
+        @keyframes marquee { 0% { transform: translateX(0%); } 100% { transform: translateX(-50%); } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
       `}</style>
     </div>
   );
