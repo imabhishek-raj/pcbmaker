@@ -148,10 +148,10 @@ const optimizePromptSpec = (rawQuery) => {
   if (q.includes('32 bit') || q.includes('32-bit') || q.includes('stm32')) {
     return `${cleanBase} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
   }
-  if (q.includes('esp') || q.includes('microcontroller') || q.includes('mcu') || q.includes('controller')) {
+  if (q.includes('esp') || q.includes('microcontroller') || q.includes('mcu') || q.includes('controller') || q.includes('drone')) {
     return `${cleanBase} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
   }
-  if (q.includes('bms') || q.includes('battery protection') || q.includes('charger') || q.includes('led')) {
+  if (q.includes('bms') || q.includes('battery protection') || q.includes('charger') || q.includes('lithium') || q.includes('led')) {
     return `${cleanBase} — Specs: Include 3.7V Li-ion Cell (BAT1), DW01A Protection IC (IC1), AO8810 N-Channel MOSFET (MOS1), 100nF Decoupling Cap (C1), and 1k Current Resistor (R1). Connect VCC, GND, OD, and OC nets.`;
   }
 
@@ -214,7 +214,7 @@ const autoPatchFloatingPins = (currentNodes, currentEdges) => {
             sourceHandle: 'VCC_out',
             target: node.id,
             targetHandle: `${pinId}_in`,
-            type: 'step',
+            type: 'smoothstep',
             animated: true,
             style: { stroke: '#EF4444', strokeWidth: 3 },
             label: 'VCC AUTO-RAIL'
@@ -227,7 +227,7 @@ const autoPatchFloatingPins = (currentNodes, currentEdges) => {
             sourceHandle: `${pinId}_out`,
             target: powerNode.id,
             targetHandle: 'GND_in',
-            type: 'step',
+            type: 'smoothstep',
             animated: true,
             style: { stroke: '#10B981', strokeWidth: 2.5, strokeDasharray: '4' },
             label: role === 'logic_high' ? 'PULL-CONFIG' : 'GND RETURN'
@@ -280,8 +280,6 @@ export default function Workspace() {
   } = useBoardStore();
 
   const [inputMsg, setInputMsg] = useState('');
-
-  const schematicHealthScore = nodes.length === 0 ? 100 : Math.max(0, 100 - (drcErrors.length * 20));
 
   useEffect(() => {
     localStorage.setItem('pcb_canvas_nodes', JSON.stringify(nodes));
@@ -365,7 +363,7 @@ export default function Workspace() {
       const newEdge = {
         ...params,
         id: `manual_edge_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
-        type: 'step',
+        type: 'smoothstep',
         animated: true,
         style: netStyle,
         label: `${srcLabel} ──► ${tgtLabel}`,
@@ -570,7 +568,12 @@ export default function Workspace() {
     setIsLoading(true);
 
     try {
-      const response = await generatePcbFromAmplify(enhancedPrompt);
+      const fetchPromise = generatePcbFromAmplify(enhancedPrompt);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Model generation timeout. DeepSeek API took too long to respond.")), 25000)
+      );
+
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
       const result = extractJsonFromOutput(response);
 
       let cleanExplanation = result?.explanation || "Circuit netlist updated on canvas.";
@@ -673,7 +676,7 @@ export default function Workspace() {
           sourceHandle: `${validSPin}_out`,
           target: tgt,
           targetHandle: `${validTPin}_in`,
-          type: 'step',
+          type: 'smoothstep',
           animated: true,
           style: netStyle,
           label: `${validSPin} ──► ${validTPin}`,
@@ -790,13 +793,27 @@ export default function Workspace() {
     whiteSpace: 'nowrap'
   };
 
-  const partnerLogos = [
-    "⚡ KiCad EDA", "☁️ AWS Amplify", "🧠 DeepSeek R1", "🛡️ STMicroelectronics", "📶 Espressif ESP32", "🔌 Texas Instruments", "🔋 DW01A BMS"
-  ];
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', width: '100vw', backgroundColor: '#09090b', color: '#f4f4f5', overflow: 'hidden', fontFamily: 'sans-serif' }}>
       
+      {/* About Modal */}
+      {isAboutModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ backgroundColor: '#18181b', border: '1px solid #00E5FF', borderRadius: '16px', maxWidth: '500px', width: '100%', padding: '24px', boxShadow: '0 20px 50px rgba(0,0,0,0.9)', fontFamily: 'monospace', color: '#f4f4f5' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, color: '#00E5FF', fontSize: '16px' }}>About pcbmaker.in</h3>
+              <button onClick={() => setIsAboutModalOpen(false)} style={{ background: 'none', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>✕</button>
+            </div>
+            <p style={{ fontSize: '12px', lineHeight: '1.6', color: '#d4d4d8', marginBottom: '16px' }}>
+              <strong>pcbmaker.in</strong> is India's 1st Autonomous AI EDA Engine, transforming natural language descriptions into production-ready KiCad schematics with real-time DRC validation, autonomous netlist routing, and vector flywheel retrieval.
+            </p>
+            <div style={{ fontSize: '10px', color: '#71717a', borderTop: '1px solid #27272a', paddingTop: '10px' }}>
+              Engineered for hardware creators worldwide. Version 2.5-Production.
+            </div>
+          </div>
+        </div>
+      )}
+
       {isPaletteOpen && (
         <div style={{
           position: 'fixed', top: '60px', right: isMobile ? '12px' : '80px', left: isMobile ? '12px' : 'auto', zIndex: 90,
@@ -822,9 +839,6 @@ export default function Workspace() {
             <span style={{ color: '#FFFFFF' }}>maker</span>
             <span style={{ color: '#7171AA' }}>.</span>
             <span style={{ color: '#10B981' }}>in</span>
-          </span>
-          <span style={{ fontSize: '10px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 6px', borderRadius: '10px', marginLeft: '10px' }}>
-            Health: {schematicHealthScore}%
           </span>
         </div>
 
@@ -856,10 +870,6 @@ export default function Workspace() {
             <button onClick={() => setIsPaletteOpen(!isPaletteOpen)} style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#00E5FF', borderColor: '#00E5FF' }}>
               🧩 Toolbox
             </button>
-            
-            <button onClick={handleSaveBoardSnapshot} style={{ ...headerBtnStyle, backgroundColor: '#10b981', color: '#09090b', border: 'none', fontWeight: 'bold' }}>
-              💾 Save Snapshot
-            </button>
 
             <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
               KiCad (.kicad_sch)
@@ -886,10 +896,6 @@ export default function Workspace() {
               🔍 DRC ({drcErrors.length})
             </button>
 
-            <button onClick={handleSaveBoardSnapshot} style={{ ...headerBtnStyle, backgroundColor: '#10b981', color: '#09090b', border: 'none', padding: '0 8px' }}>
-              💾 Save
-            </button>
-
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               style={{ ...headerBtnStyle, backgroundColor: '#27272a', borderColor: '#00E5FF', color: '#00E5FF', padding: '0 10px', fontSize: '13px' }}
@@ -902,6 +908,21 @@ export default function Workspace() {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', height: 'calc(100dvh - 52px)' }}>
         
+        {/* Floating Save Snapshot Button on Bottom Right Corner */}
+        <button
+          onClick={handleSaveBoardSnapshot}
+          style={{
+            position: 'absolute', bottom: '24px', right: isRightDrawerOpen && !isMobile ? '340px' : '24px', zIndex: 35,
+            backgroundColor: '#10b981', color: '#09090b', border: 'none',
+            fontSize: '12px', fontWeight: '700', padding: '10px 18px', borderRadius: '30px',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+            boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)', backdropFilter: 'blur(8px)',
+            transition: 'right 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}
+        >
+          <span>💾 Save Snapshot</span>
+        </button>
+
         <aside style={{ 
           width: isMobile ? '100vw' : '320px', minWidth: isMobile ? '100vw' : '300px', maxWidth: isMobile ? '100vw' : '340px', 
           borderRight: '1px solid #27272a', backgroundColor: '#18181b', display: 'flex', flexDirection: 'column', zIndex: 40,
@@ -985,7 +1006,7 @@ export default function Workspace() {
             <button
               onClick={() => setIsLeftCopilotOpen(true)}
               style={{
-                position: 'absolute', bottom: '24px', right: '24px', zIndex: 35,
+                position: 'absolute', bottom: '24px', left: '24px', zIndex: 35,
                 backgroundColor: '#18181b', border: '1px solid #00E5FF', color: '#ffffff',
                 fontSize: '12px', fontWeight: '700', padding: '12px 20px', borderRadius: '30px',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
@@ -1017,7 +1038,7 @@ export default function Workspace() {
                     value={heroPromptInput}
                     disabled={isLoading}
                     onChange={(e) => setHeroPromptInput(e.target.value)}
-                    placeholder="Type to build e.g. 5W USB Speaker, ESP32 Flight Controller..."
+                    placeholder="Type to build e.g. 5W USB Speaker, ESP32 Flight Control..."
                     style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '12px', padding: '12px 14px', borderRadius: '8px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)' }}
                   />
                   <button type="submit" disabled={isLoading} style={{ backgroundColor: '#00E5FF', color: '#09090b', fontWeight: '700', fontSize: '12px', padding: '0 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
@@ -1079,7 +1100,7 @@ export default function Workspace() {
               onlyRenderVisibleElements={true}
               fitViewOptions={{ padding: 0.2 }}
               isValidConnection={() => true}
-              connectionLineType="step"
+              connectionLineType="smoothstep"
               connectionRadius={35}
               connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
             >
@@ -1159,9 +1180,52 @@ export default function Workspace() {
             {selectedEdge && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Net Trace</span>
+                  <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Net Trace Routing</span>
                   <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '11px', marginTop: '4px' }}>
                     {selectedEdge.label || selectedEdge.id}
+                  </div>
+                </div>
+
+                {/* 🔀 INTERACTIVE RAIL ROUTING STYLE SELECTOR */}
+                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ color: '#71717a', fontSize: '9px', textTransform: 'uppercase' }}>Interactive Rail Routing Mode</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
+                    <button
+                      onClick={() => {
+                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'smoothstep' } : e));
+                        setSelectedEdge(prev => ({ ...prev, type: 'smoothstep' }));
+                      }}
+                      style={{ backgroundColor: selectedEdge.type === 'smoothstep' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'smoothstep' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      Smooth Orthogonal
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'step' } : e));
+                        setSelectedEdge(prev => ({ ...prev, type: 'step' }));
+                      }}
+                      style={{ backgroundColor: selectedEdge.type === 'step' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'step' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      Sharp Step
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'default' } : e));
+                        setSelectedEdge(prev => ({ ...prev, type: 'default' }));
+                      }}
+                      style={{ backgroundColor: selectedEdge.type === 'default' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'default' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      Direct Bezier
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'straight' } : e));
+                        setSelectedEdge(prev => ({ ...prev, type: 'straight' }));
+                      }}
+                      style={{ backgroundColor: selectedEdge.type === 'straight' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'straight' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      Direct Straight
+                    </button>
                   </div>
                 </div>
 
