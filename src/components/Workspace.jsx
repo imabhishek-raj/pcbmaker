@@ -179,20 +179,6 @@ const extractJsonFromOutput = (rawResult) => {
   try { return JSON.parse(text); } catch (e) { return {}; }
 };
 
-const getPinRole = (pinName, compLabel) => {
-  const p = String(pinName || '').toUpperCase();
-  const c = String(compLabel || '').toUpperCase();
-
-  if (['VCC', 'VDD', '3V3', '5V', '12V', 'VIN', 'VBUS', 'VBAT', 'VDDA', 'VCC1', 'VCC2'].some(k => p.includes(k))) return 'power_pos';
-  if (['GND', 'VSS', 'AGND', 'DGND', 'PGND', 'EP', 'PAD', '-'].some(k => p.includes(k))) return 'power_neg';
-  if (['FAULT', 'MUTE', 'SD', 'SHDN', 'EN', 'RESET', 'NRST', 'AM0', 'AM1', 'GAIN', 'MODE', 'CE'].some(k => p.includes(k))) return 'logic_high';
-  if (['NC', 'RSVD', 'RESERVED'].some(k => p.includes(k))) return 'no_connect';
-  if (c.includes('JACK') || c.includes('CONNECTOR') || c.includes('TERMINAL') || c.includes('HEADER')) {
-    return p === '1' ? 'power_pos' : 'power_neg';
-  }
-  return 'signal';
-};
-
 const autoPatchFloatingPins = (currentNodes, currentEdges) => {
   const patchedEdges = [...currentEdges];
   const connectedPinKeys = new Set();
@@ -252,6 +238,14 @@ const autoPatchFloatingPins = (currentNodes, currentEdges) => {
   });
 
   return patchedEdges;
+};
+
+const getPinRole = (pinName, compLabel) => {
+  const p = String(pinName || '').toUpperCase();
+  const c = String(compLabel || '').toUpperCase();
+  if (['VCC', 'VDD', '3V3', '5V', '12V', 'VIN', 'VBUS', 'VBAT'].some(k => p.includes(k))) return 'power_pos';
+  if (['GND', 'VSS', 'AGND', '-'].some(k => p.includes(k))) return 'power_neg';
+  return 'signal';
 };
 
 export default function Workspace() {
@@ -565,10 +559,11 @@ export default function Workspace() {
       setIsLeftCopilotOpen(true);
     }
 
-    const enhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(optimizePromptSpec(queryText, chatMessages)) : queryText;
+    const cleanBase = queryText.split('— Specs:')[0].trim();
+    const enhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(optimizePromptSpec(cleanBase, chatMessages)) : cleanBase;
 
-    if (!forceEnhanced && enhancedPrompt !== queryText) {
-      setPendingPromptObj({ raw: queryText, enhanced: enhancedPrompt });
+    if (!forceEnhanced && enhancedPrompt !== cleanBase) {
+      setPendingPromptObj({ raw: cleanBase, enhanced: enhancedPrompt });
       addChatMessage({ 
         sender: 'AI Copilot', 
         text: `💡 Suggested Hardware Spec Enhancement:\n"${enhancedPrompt}"\nWould you like to build using this enhanced RAG specification or your original query words?` 
@@ -577,7 +572,7 @@ export default function Workspace() {
     }
 
     setPendingPromptObj(null);
-    addChatMessage({ sender: 'User', text: queryText });
+    addChatMessage({ sender: 'User', text: cleanBase });
     setIsLoading(true);
 
     try {
@@ -745,7 +740,7 @@ export default function Workspace() {
 
       const currentErrors = runDRCCheck(formattedNodes, verifiedEdges);
       if (currentErrors.length === 0 && typeof logTrainingPair === 'function') {
-        logTrainingPair(queryText, result, currentErrors.length);
+        logTrainingPair(cleanBase, result, currentErrors.length);
       }
 
     } catch (error) {
