@@ -1,4 +1,3 @@
-// src/components/Workspace.jsx
 import React, { useState, useCallback, useEffect, Component } from 'react';
 import { 
   ReactFlow, 
@@ -110,7 +109,7 @@ const arePinsCompatible = (p1 = '', p2 = '') => {
   return false;
 };
 
-// 🛡️ FIREWALL PIN SANITIZER: Forces passives to strictly have pins 1 and 2, NO VCC/GND
+// 🛡️ FIREWALL PIN SANITIZER
 const cleanNodePins = (compName, rawPins) => {
   const name = String(compName || '').toUpperCase();
   
@@ -274,6 +273,11 @@ export default function Workspace() {
   const [selectedEdge, setSelectedEdge] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [heroPromptInput, setHeroPromptInput] = useState('');
+  
+  // Search S3 Flywheel State
+  const [searchQueryInput, setSearchQueryInput] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearchingFlywheel, setIsSearchingFlywheel] = useState(false);
 
   const { 
     selectedNode, 
@@ -310,9 +314,9 @@ export default function Workspace() {
     setSelectedNode(null);
     setSelectedEdge(null);
     clearChatHistory();
+    setSearchResults([]);
   };
 
-// ⚡ PERFORMANCE FIX: Only run DRC when components are added/removed or edges change, NOT on position dragging
   useEffect(() => {
     const warnings = runDRCCheck(nodes, edges);
     setDrcErrors(warnings);
@@ -478,6 +482,37 @@ export default function Workspace() {
     addChatMessage({ sender: 'AI Copilot', text: `Added component: ${item.name} to canvas.` });
     setIsPaletteOpen(false);
     if (isMobile) setIsMobileMenuOpen(false);
+  };
+
+  // 🚀 LIVE FASTAPI SEARCH INTEGRATION (Connected to EC2 S3 Flywheel)
+  const handleFlywheelSearch = async (queryText) => {
+    const q = queryText || searchQueryInput;
+    if (!q.trim() || isSearchingFlywheel) return;
+
+    setIsSearchingFlywheel(true);
+    addChatMessage({ sender: 'User', text: `Searching S3 Flywheel for: "${q}"` });
+
+    try {
+      const response = await fetch("http://13.201.81.254:8000/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, limit: 5 })
+      });
+
+      if (!response.ok) throw new Error(`Search API returned status ${response.status}`);
+
+      const data = await response.json();
+      setSearchResults(data.matches || []);
+      addChatMessage({ 
+        sender: 'AI Copilot', 
+        text: `Found ${data.total_results || 0} matching schematics from S3 Flywheel index.` 
+      });
+    } catch (error) {
+      console.error("Flywheel Search Error:", error);
+      addChatMessage({ sender: 'AI Copilot', text: `Search connection error: ${error.message}. Ensure EC2 port 8000 is reachable.` });
+    } finally {
+      setIsSearchingFlywheel(false);
+    }
   };
 
   const executeGenerationQuery = async (queryText) => {
@@ -800,7 +835,7 @@ export default function Workspace() {
           </div>
         )}
 
-        {/* MOBILE CONTROLS (DRC BADGE + VERTICAL MENU TOGGLE) */}
+        {/* MOBILE CONTROLS */}
         {isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button 
@@ -826,54 +861,10 @@ export default function Workspace() {
         )}
       </header>
 
-      {/* MOBILE VERTICAL ACTION BAR (DROPS DOWN FROM TOP-LEFT) */}
-      {isMobile && isMobileMenuOpen && (
-        <div style={{
-          position: 'absolute',
-          top: '52px',
-          left: '12px',
-          zIndex: 80,
-          width: '210px',
-          backgroundColor: '#18181b',
-          border: '1px solid #27272a',
-          borderTop: 'none',
-          borderRadius: '0 0 8px 8px',
-          padding: '10px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.8)'
-        }}>
-          <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#71717a', textTransform: 'uppercase', marginBottom: '2px' }}>
-            ⚡ Mobile Action Bar
-          </span>
-
-          <button onClick={handleAutoLayout} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#27272a', color: '#38bdf8' }}>
-            ✨ Layout Canvas
-          </button>
-          
-          <button onClick={() => { setIsPaletteOpen(!isPaletteOpen); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#27272a', color: '#00E5FF', borderColor: '#00E5FF' }}>
-            🧩 Component Toolbox
-          </button>
-
-          <button onClick={handleExportKiCad} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#0891b2', color: '#ffffff', border: 'none' }}>
-            📄 KiCad (.kicad_sch)
-          </button>
-
-          <button onClick={exportFlywheelDataset} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#0284c7', color: '#ffffff', border: 'none' }}>
-            📥 Dataset Export
-          </button>
-
-          <button onClick={() => { setIsAboutModalOpen(true); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, width: '100%', justifyContent: 'flex-start', backgroundColor: '#27272a', color: '#a1a1aa' }}>
-            ℹ️ About pcbmaker
-          </button>
-        </div>
-      )}
-
       {/* WORKSPACE AREA */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', height: 'calc(100dvh - 52px)' }}>
         
-        {/* LEFT COPILOT DRAWER (SLIDES IN FROM LEFT) */}
+        {/* LEFT COPILOT DRAWER */}
         <aside style={{ 
           width: isMobile ? '100vw' : '320px', 
           minWidth: isMobile ? '100vw' : '300px', 
@@ -955,7 +946,7 @@ export default function Workspace() {
           onDrop={onDrop}
           style={{ flex: 1, width: '100%', height: '100%', backgroundColor: '#09090b', position: 'relative', touchAction: 'none' }}
         >
-          {/* FLOATING ACTION COPILOT TRIGGER (ON THE RIGHT SIDE) */}
+          {/* FLOATING ACTION COPILOT TRIGGER */}
           {!isLeftCopilotOpen && (
             <button
               onClick={() => setIsLeftCopilotOpen(true)}
@@ -984,7 +975,7 @@ export default function Workspace() {
             </button>
           )}
 
-          {/* HERO EMPTY-STATE OVERLAY (SHOWN WHEN CANVAS IS EMPTY) */}
+          {/* HERO EMPTY-STATE OVERLAY */}
           {nodes.length === 0 && (
             <div style={{
               position: 'absolute',
@@ -1013,7 +1004,6 @@ export default function Workspace() {
                 alignItems: 'center',
                 gap: '18px'
               }}>
-                {/* CLEAN BADGE */}
                 <div style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -1031,7 +1021,6 @@ export default function Workspace() {
                   <span>India's 1st Autonomous AI EDA Engine</span>
                 </div>
 
-                {/* MAIN TITLE */}
                 <h1 style={{
                   fontSize: isMobile ? '22px' : '28px',
                   fontWeight: '800',
@@ -1043,7 +1032,6 @@ export default function Workspace() {
                   Dream It. Design It. Deploy It.
                 </h1>
 
-                {/* ANIMATED TYPEWRITER SLOGAN */}
                 <div style={{
                   minHeight: '28px',
                   display: 'flex',
@@ -1055,7 +1043,7 @@ export default function Workspace() {
                   <TypewriterText texts={HERO_SLOGANS} />
                 </div>
 
-                {/* HERO PROMPT FORM FOR DIRECT GENERATION */}
+                {/* GENERATION PROMPT FORM */}
                 <form 
                   onSubmit={handleHeroSubmit} 
                   style={{
@@ -1101,41 +1089,94 @@ export default function Workspace() {
                     Build ⚡
                   </button>
                 </form>
+
+                {/* S3 FLYWHEEL VECTOR SEARCH WIDGET */}
+                <div style={{ width: '100%', borderTop: '1px solid #27272a', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      value={searchQueryInput}
+                      disabled={isSearchingFlywheel}
+                      onChange={(e) => setSearchQueryInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleFlywheelSearch()}
+                      placeholder="Search S3 Flywheel schematics..."
+                      style={{
+                        flex: 1,
+                        backgroundColor: '#09090b',
+                        border: '1px solid #10b981',
+                        fontSize: '11px',
+                        padding: '10px 12px',
+                        borderRadius: '6px',
+                        color: '#34d399',
+                        fontFamily: 'monospace',
+                        outline: 'none'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleFlywheelSearch()}
+                      disabled={isSearchingFlywheel}
+                      style={{
+                        backgroundColor: '#10b981',
+                        color: '#09090b',
+                        fontWeight: '700',
+                        fontSize: '11px',
+                        padding: '0 14px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {isSearchingFlywheel ? 'Searching...' : '🔍 Search Index'}
+                    </button>
+                  </div>
+
+                  {searchResults.length > 0 && (
+                    <div style={{ maxHeight: '120px', overflowY: 'auto', backgroundColor: '#09090b', border: '1px solid #27272a', borderRadius: '6px', padding: '6px', textAlign: 'left' }}>
+                      <div style={{ fontSize: '9px', color: '#71717a', textTransform: 'uppercase', marginBottom: '4px' }}>Top Flywheel Matches:</div>
+                      {searchResults.map((res, i) => (
+                        <div key={i} style={{ fontSize: '10px', color: '#67e8f9', padding: '3px 0', borderBottom: '1px solid #18181b' }}>
+                          [{res.source}] (Distance: {res.distance?.toFixed(2)})
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
               </div>
             </div>
           )}
 
           <FlowErrorBoundary>
             <ReactFlow
-  nodes={nodes}
-  edges={styledEdges}
-  onNodesChange={onNodesChange}
-  onEdgesChange={onEdgesChange}
-  onConnect={onConnect}
-  onEdgeClick={handleEdgeClick}
-  onNodeClick={handleNodeClick}
-  nodeTypes={nodeTypes}
-  colorMode="dark"
-  fitView
-  panOnScroll={true}
-  zoomOnPinch={true}
-  panOnDrag={true}
-  preventScrolling={false}
-  nodesDraggable={true} // 👈 Fully enabled for both mobile and desktop!
-  nodesConnectable={true}
-  elementsSelectable={true}
-  selectNodesOnDrag={false}
-  elevateNodesOnSelect={true}
-  onlyRenderVisibleElements={true}
-  fitViewOptions={{ padding: 0.2 }}
-  isValidConnection={() => true}
-  connectionLineType="step"
-  connectionRadius={35}
-  connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
->
-  <Background color="#27272a" gap={20} size={1} />
-  <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
-</ReactFlow>
+              nodes={nodes}
+              edges={styledEdges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onEdgeClick={handleEdgeClick}
+              onNodeClick={handleNodeClick}
+              nodeTypes={nodeTypes}
+              colorMode="dark"
+              fitView
+              panOnScroll={true}
+              zoomOnPinch={true}
+              panOnDrag={true}
+              preventScrolling={false}
+              nodesDraggable={true}
+              nodesConnectable={true}
+              elementsSelectable={true}
+              selectNodesOnDrag={false}
+              elevateNodesOnSelect={true}
+              onlyRenderVisibleElements={true}
+              fitViewOptions={{ padding: 0.2 }}
+              isValidConnection={() => true}
+              connectionLineType="step"
+              connectionRadius={35}
+              connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2.5, strokeDasharray: '6' }}
+            >
+              <Background color="#27272a" gap={20} size={1} />
+              <Controls style={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }} />
+            </ReactFlow>
           </FlowErrorBoundary>
         </main>
 
@@ -1198,7 +1239,6 @@ export default function Workspace() {
               Inspector Panel
             </div>
 
-            {/* COMPONENT INSPECTOR */}
             {selectedNode && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
@@ -1223,7 +1263,6 @@ export default function Workspace() {
               </div>
             )}
 
-            {/* WIRE TRACE / NET INSPECTOR */}
             {selectedEdge && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a' }}>
@@ -1268,7 +1307,7 @@ export default function Workspace() {
         </aside>
       </div>
 
-      {/* ABOUT US, OUR MISSION & ANIMATED PARTNERS MODAL */}
+      {/* ABOUT MODAL */}
       {isAboutModalOpen && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -1282,7 +1321,6 @@ export default function Workspace() {
             display: 'flex', flexDirection: 'column', fontFamily: 'monospace', color: '#f4f4f5',
             boxShadow: '0 20px 50px rgba(0,0,0,0.8)'
           }}>
-            {/* MODAL HEADER */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #27272a', paddingBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontWeight: '800', fontSize: '18px' }}>
@@ -1295,10 +1333,7 @@ export default function Workspace() {
               <button onClick={() => setIsAboutModalOpen(false)} style={{ background: 'none', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }}>✕</button>
             </div>
 
-            {/* SCROLLABLE BODY CONTENT */}
             <div style={{ flex: 1, overflowY: 'auto', paddingRight: '6px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              
-              {/* MISSION STATEMENT */}
               <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '8px', border: '1px solid #27272a' }}>
                 <span style={{ fontSize: '11px', color: '#FF6B00', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>
                   🎯 Our Mission
@@ -1308,7 +1343,6 @@ export default function Workspace() {
                 </p>
               </div>
 
-              {/* SERVICES LIST SECTION */}
               <div style={{ borderTop: '1px solid #27272a', paddingTop: '12px' }}>
                 <span style={{ fontSize: '11px', color: '#00E5FF', fontWeight: 'bold', textTransform: 'uppercase', display: 'block', marginBottom: '10px' }}>
                   ⚡ Platform Capabilities & Services
@@ -1337,7 +1371,6 @@ export default function Workspace() {
                 </div>
               </div>
 
-              {/* ANIMATED ECOSYSTEM PARTNERS MARQUEE */}
               <div style={{ borderTop: '1px solid #27272a', paddingTop: '12px', overflow: 'hidden' }}>
                 <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
                   🤝 Ecosystem Compatibility & Integrations
@@ -1357,34 +1390,31 @@ export default function Workspace() {
                 </div>
               </div>
 
-              {/* DIRECT SUPPORT BOX */}
               <div style={{ backgroundColor: '#09090b', padding: '12px', borderRadius: '6px', border: '1px solid #27272a', marginTop: '2px' }}>
                 <span style={{ fontSize: '10px', color: '#71717a', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Direct Inquiries & Technical Support</span>
                 <a href="mailto:support@pcbmaker.in" style={{ color: '#00E5FF', fontWeight: 'bold', textDecoration: 'none', fontSize: '13px' }}>
                   ✉️ support@pcbmaker.in
                 </a>
               </div>
-
             </div>
           </div>
-
-          <style>{`
-            @keyframes marquee {
-              0% { transform: translateX(0%); }
-              100% { transform: translateX(-50%); }
-            }
-            @keyframes blink {
-              0%, 100% { opacity: 1; }
-              50% { opacity: 0; }
-            }
-            @keyframes spin {
-              0% { transform: rotate(0deg); }
-              100% { transform: rotate(360deg); }
-            }
-          `}</style>
         </div>
       )}
 
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0%); }
+          100% { transform: translateX(-50%); }
+        }
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
