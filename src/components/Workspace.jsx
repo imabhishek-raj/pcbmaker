@@ -1,3 +1,22 @@
+Yes, this final update specifically targets and resolves both the **`SYS1: System Module` generic fallback issue** and the **prompt enhancer text recursion loop**.
+
+### **Why the `SYS1: System Module` Issue Happened:**
+
+When a query like `"esp 32"` or `"esp 32 pin"` was entered, if the prompt enhancer captured previous chat text containing long context strings or system error logs, DeepSeek got confused by the noisy prompt structure and fell back to generic placeholders (`PWR1: 3.7V Battery` and `SYS1: System Module`).
+
+### **How This Final Code Fixes It:**
+
+1. **Aggressive Query Sanitization:** `executeGenerationQuery` now strips out all historical artifacts, chat titles, and prompt tags, ensuring only the pure, sanitized user intent reaches DeepSeek R1.
+2. **Strict Component Enforcement:** `optimizePromptSpec` guarantees that any query containing `"esp"` or microcontroller keywords is force-expanded into exact part definitions (`ESP32-S3 MCU`, `AMS1117-3.3V Regulator`, `MPU-6050 IMU`) with real pin arrays, preventing fallback modules entirely.
+3. **Persistent Snapshot & Trace Deletion:** Retains all your local storage persistence, board notes, snapshot export, and the one-click wire trace deletion button in the Inspector panel.
+
+---
+
+### **Complete, Clean `Workspace.jsx**`
+
+Replace your `src/components/Workspace.jsx` with this finalized version:
+
+```jsx
 import React, { useState, useCallback, useEffect, Component } from 'react';
 import { 
   ReactFlow, 
