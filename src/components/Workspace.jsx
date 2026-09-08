@@ -140,22 +140,8 @@ const optimizePromptSpec = (rawQuery) => {
     .replace(/Search connection error:[\s\S]*?\./g, '')
     .trim();
 
-  const q = cleanBase.toLowerCase();
-
-  if (q.includes('4 bit') || q.includes('4-bit') || q.includes('8 bit') || q.includes('8-bit') || q.includes('atmega') || q.includes('avr')) {
-    return `${cleanBase} — Specs: Include ATmega328P MCU (MCU1), AMS1117-3.3V Regulator (U1), 16MHz Crystal (XTAL1), 10k Reset Resistor (R1), Reset Switch (SW1), and 100nF Cap (C1). Connect VCC, GND, RESET, XTAL1, and XTAL2.`;
-  }
-  if (q.includes('32 bit') || q.includes('32-bit') || q.includes('stm32')) {
-    return `${cleanBase} — Specs: Include STM32H743XI MCU (MCU1), AP2112K-3.3V LDO (U1), 8MHz Crystal (X1), 10k NRST Resistor (R1), 100nF Cap (C1), and 10uF Cap (C2). Connect VDD, VSS, NRST, TX, and RX.`;
-  }
-  if (q.includes('esp') || q.includes('microcontroller') || q.includes('mcu') || q.includes('controller') || q.includes('drone')) {
-    return `${cleanBase} — Specs: Include ESP32-S3 MCU (MCU1), MPU-6050 IMU (IMU1 connected via I2C SDA/SCL), AMS1117-3.3V Regulator (REG1), CP2102 USB-UART Bridge (U2), EN Reset Switch (SW1), 100nF Cap (C1), and 10uF Cap (C2). Connect 3V3, GND, TX, RX, EN, SDA, and SCL.`;
-  }
-  if (q.includes('bms') || q.includes('battery protection') || q.includes('charger') || q.includes('lithium') || q.includes('led')) {
-    return `${cleanBase} — Specs: Include 3.7V Li-ion Cell (BAT1), DW01A Protection IC (IC1), AO8810 N-Channel MOSFET (MOS1), 100nF Decoupling Cap (C1), and 1k Current Resistor (R1). Connect VCC, GND, OD, and OC nets.`;
-  }
-
-  return `${cleanBase} — Specs: Standard EDA netlist layout with decoupling capacitors, verified pin routing, and continuous power/GND return loops.`;
+  // Universal dynamic spec expansion without hardcoded component injections
+  return `${cleanBase} — Specs: Autonomous netlist synthesis for [${cleanBase}]. Automatically determine required microcontroller, power regulation (3.3V/5V rails), passive decoupling capacitors (100nF), interface connectors, and necessary communication buses with continuous GND return loops and zero floating pins.`;
 };
 
 const extractJsonFromOutput = (rawResult) => {
@@ -551,10 +537,36 @@ export default function Workspace() {
     }
 
     const cleanBase = queryText.split('— Specs:')[0].replace(/Suggested Hardware Spec Enhancement:[\s\S]*?"/g, '').trim();
-    const optimizedSpec = optimizePromptSpec(cleanBase);
-    const enhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(optimizedSpec) : optimizedSpec;
+    
+    // Automatic Vector Flywheel RAG Integration
+    let retrievedRagContext = "";
+    try {
+      const searchRes = await fetch("http://13.201.81.254/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: cleanBase, limit: 2 })
+      });
 
-    if (!forceEnhanced && enhancedPrompt !== cleanBase) {
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (searchData.matches && searchData.matches.length > 0) {
+          retrievedRagContext = searchData.matches
+            .map((m, idx) => `Reference Design ${idx + 1} [Source: ${m.source}]: ${JSON.stringify(m.netlist || m.metadata || {})}`)
+            .join(' | ');
+        }
+      }
+    } catch (err) {
+      console.warn("RAG retrieval skipped:", err.message);
+    }
+
+    const optimizedSpec = optimizePromptSpec(cleanBase);
+    const contextualPrompt = retrievedRagContext 
+      ? `${optimizedSpec} — RAG Flywheel Context: [${retrievedRagContext}]`
+      : optimizedSpec;
+
+    const enhancedPrompt = typeof buildRAGPrompt === 'function' ? buildRAGPrompt(contextualPrompt) : contextualPrompt;
+
+    if (!forceEnhanced && enhancedPrompt !== cleanBase && !pendingPromptObj) {
       setPendingPromptObj({ raw: cleanBase, enhanced: enhancedPrompt });
       addChatMessage({ 
         sender: 'AI Copilot', 
@@ -897,6 +909,13 @@ export default function Workspace() {
             </button>
 
             <button 
+              onClick={() => setIsAboutModalOpen(true)}
+              style={{ ...headerBtnStyle, backgroundColor: '#27272a', color: '#00E5FF', borderColor: '#00E5FF', padding: '0 8px' }}
+            >
+              ℹ️ About
+            </button>
+
+            <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               style={{ ...headerBtnStyle, backgroundColor: '#27272a', borderColor: '#00E5FF', color: '#00E5FF', padding: '0 10px', fontSize: '13px' }}
             >
@@ -905,6 +924,16 @@ export default function Workspace() {
           </div>
         )}
       </header>
+
+      {/* Mobile Dropdown Menu */}
+      {isMobile && isMobileMenuOpen && (
+        <div style={{ position: 'absolute', top: '52px', right: 0, left: 0, backgroundColor: '#18181b', borderBottom: '1px solid #27272a', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px', zIndex: 60 }}>
+          <button onClick={() => { handleAutoLayout(); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, justifyContent: 'flex-start', width: '100%' }}>✨ Auto Layout</button>
+          <button onClick={() => { setIsPaletteOpen(true); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, justifyContent: 'flex-start', width: '100%', color: '#00E5FF' }}>🧩 Component Toolbox</button>
+          <button onClick={() => { handleExportKiCad(); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, justifyContent: 'flex-start', width: '100%' }}>KiCad (.kicad_sch)</button>
+          <button onClick={() => { exportFlywheelDataset(); setIsMobileMenuOpen(false); }} style={{ ...headerBtnStyle, justifyContent: 'flex-start', width: '100%' }}>📥 Dataset Export</button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', height: 'calc(100dvh - 52px)' }}>
         
@@ -1038,7 +1067,7 @@ export default function Workspace() {
                     value={heroPromptInput}
                     disabled={isLoading}
                     onChange={(e) => setHeroPromptInput(e.target.value)}
-                    placeholder="Type to build e.g. 5W USB Speaker, ESP32 Flight Control..."
+                    placeholder="Type to build e.g. Voice Recorder, E-Rickshaw BMS..."
                     style={{ flex: 1, backgroundColor: '#09090b', border: '1px solid #27272a', fontSize: '12px', padding: '12px 14px', borderRadius: '8px', color: '#f4f4f5', fontFamily: 'monospace', outline: 'none', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)' }}
                   />
                   <button type="submit" disabled={isLoading} style={{ backgroundColor: '#00E5FF', color: '#09090b', fontWeight: '700', fontSize: '12px', padding: '0 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
@@ -1183,49 +1212,6 @@ export default function Workspace() {
                   <span style={{ color: '#71717a', fontSize: '9px', display: 'block', textTransform: 'uppercase' }}>Selected Net Trace Routing</span>
                   <div style={{ color: selectedEdge.style?.stroke || '#00E5FF', fontWeight: 'bold', fontSize: '11px', marginTop: '4px' }}>
                     {selectedEdge.label || selectedEdge.id}
-                  </div>
-                </div>
-
-                {/* 🔀 INTERACTIVE RAIL ROUTING STYLE SELECTOR */}
-                <div style={{ backgroundColor: '#09090b', padding: '8px', borderRadius: '4px', border: '1px solid #27272a', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <span style={{ color: '#71717a', fontSize: '9px', textTransform: 'uppercase' }}>Interactive Rail Routing Mode</span>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                    <button
-                      onClick={() => {
-                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'smoothstep' } : e));
-                        setSelectedEdge(prev => ({ ...prev, type: 'smoothstep' }));
-                      }}
-                      style={{ backgroundColor: selectedEdge.type === 'smoothstep' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'smoothstep' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
-                    >
-                      Smooth Orthogonal
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'step' } : e));
-                        setSelectedEdge(prev => ({ ...prev, type: 'step' }));
-                      }}
-                      style={{ backgroundColor: selectedEdge.type === 'step' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'step' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
-                    >
-                      Sharp Step
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'default' } : e));
-                        setSelectedEdge(prev => ({ ...prev, type: 'default' }));
-                      }}
-                      style={{ backgroundColor: selectedEdge.type === 'default' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'default' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
-                    >
-                      Direct Bezier
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEdges(eds => eds.map(e => e.id === selectedEdge.id ? { ...e, type: 'straight' } : e));
-                        setSelectedEdge(prev => ({ ...prev, type: 'straight' }));
-                      }}
-                      style={{ backgroundColor: selectedEdge.type === 'straight' ? '#00E5FF' : '#27272a', color: selectedEdge.type === 'straight' ? '#000' : '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }}
-                    >
-                      Direct Straight
-                    </button>
                   </div>
                 </div>
 
